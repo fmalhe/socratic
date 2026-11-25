@@ -94,3 +94,17 @@ curl -s -X POST http://localhost:8080/api/progress/complete \
   -H "Content-Type: application/json" \
   -d '{"activityType": "READING", "starsEarned": 10, "trickyWords": ["borboleta", "autocarro"]}' | jq
 ```
+
+## iPad Safari Web App (PWA)
+
+The kid-friendly web app is served directly at `/` when the Spring Boot server runs (`./mvnw spring-boot:run`):
+- Open `http://<your-machine-lan-ip>:8080` in **Safari on iPad** (or tap **Share → Add to Home Screen** for full-screen PWA mode).
+- Supports iPad camera capture (`capture="environment"`), tap-to-hear syllables, slow `0.75x` TTS with automatic Safari `speechSynthesis` fallback when GCP TTS is not configured, and exercise-by-exercise homework ping-pong.
+
+## MCP Server (for Gemini / AI Agents)
+
+Socratic also runs a Spring AI WebMVC MCP Server (`spring-ai-starter-mcp-server-webmvc`) on the same port, exposing parent/agent tools:
+- `getLearnerProfile`
+- `getProgressAndTrickyWords`
+- `listHomeworkSessions`
+- `getHomeworkSession`

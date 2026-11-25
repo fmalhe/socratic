@@ -1,0 +1,9 @@
+{
+  "name": "Socratic — Reading & Homework Tutor",
+  "short_name": "Socratic",
+  "description": "Multilingual reading and homework tutor for kids",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F2",
+  "theme_color": "#D95D39"
+}

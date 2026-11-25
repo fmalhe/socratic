@@ -26,6 +26,11 @@ spring:
         chat:
           options:
             model: ${GEMINI_MODEL:gemini-2.5-flash}
+    mcp:
+      server:
+        name: socratic
+        version: 0.0.1-SNAPSHOT
+        type: SYNC
 
 app:
   cors:

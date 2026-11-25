@@ -6,6 +6,7 @@ import io.fmalhe.socratic.homework.HomeworkExerciseId;
 import io.fmalhe.socratic.homework.HomeworkNotFoundException;
 import io.fmalhe.socratic.homework.HomeworkReplyRequest;
 import io.fmalhe.socratic.homework.HomeworkReplyResponse;
+import io.fmalhe.socratic.homework.HomeworkSessionFacade;
 import io.fmalhe.socratic.homework.HomeworkSessionId;
 import io.fmalhe.socratic.homework.HomeworkSessionResponse;
 import io.fmalhe.socratic.homework.MessageSender;
@@ -32,13 +33,14 @@ import java.util.Optional;
 @NullMarked
 @Service
 @RequiredArgsConstructor
-public class HomeworkSessionService {
+public class HomeworkSessionService implements HomeworkSessionFacade {
 
     private final ProfileFacade profileFacade;
     private final HomeworkPromptFactory promptFactory;
     private final JooqHomeworkRepository repository;
     private final ChatClient.Builder chatClientBuilder;
 
+    @Override
     @Transactional
     public HomeworkSessionResponse scanPage(ProfileId profileId, MultipartFile image) {
         if (image.isEmpty()) {
@@ -57,6 +59,7 @@ public class HomeworkSessionService {
         return repository.createSession(profile.id(), Objects.requireNonNull(scanned, "AI returned empty scan"));
     }
 
+    @Override
     @Transactional(readOnly = true)
     public HomeworkSessionResponse getSession(ProfileId profileId, HomeworkSessionId sessionId) {
         var profile = profileFacade.getActiveProfile(profileId);
@@ -64,12 +67,14 @@ public class HomeworkSessionService {
                 .orElseThrow(() -> new HomeworkNotFoundException("Homework session not found: " + sessionId.value()));
     }
 
+    @Override
     @Transactional(readOnly = true)
     public List<HomeworkSessionResponse> listSessions(ProfileId profileId) {
         var profile = profileFacade.getActiveProfile(profileId);
         return repository.findRecentSessions(profile.id());
     }
 
+    @Override
     @Transactional
     public HomeworkReplyResponse replyToExercise(
             ProfileId profileId,
@@ -111,6 +116,7 @@ public class HomeworkSessionService {
                 reply.followUpQuestionNative());
     }
 
+    @Override
     @Transactional
     public HomeworkExerciseDto completeExercise(
             ProfileId profileId,

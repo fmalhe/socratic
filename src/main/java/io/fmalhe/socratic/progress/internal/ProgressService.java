@@ -6,6 +6,7 @@ import io.fmalhe.socratic.profile.ProfileId;
 import io.fmalhe.socratic.progress.ActivityCompletedEvent;
 import io.fmalhe.socratic.progress.ActivityType;
 import io.fmalhe.socratic.progress.CompleteActivityRequest;
+import io.fmalhe.socratic.progress.ProgressFacade;
 import io.fmalhe.socratic.progress.ProgressResponse;
 import io.fmalhe.socratic.progress.internal.JooqProgressRepository.ChildProgressRow;
 import lombok.RequiredArgsConstructor;
@@ -21,18 +22,20 @@ import java.util.List;
 @NullMarked
 @Service
 @RequiredArgsConstructor
-public class ProgressService {
+public class ProgressService implements ProgressFacade {
 
     private final ProfileFacade profileFacade;
     private final JooqProgressRepository repository;
     private final StreakCalculator streakCalculator;
 
+    @Override
     @Transactional(readOnly = true)
     public ProgressResponse getProgress(ProfileId profileId) {
         var profile = profileFacade.getActiveProfile(profileId);
         return repository.findProgressResponse(profile.id());
     }
 
+    @Override
     @Transactional
     public ProgressResponse completeActivity(ProfileId profileId, CompleteActivityRequest request) {
         var profile = profileFacade.getActiveProfile(profileId);
