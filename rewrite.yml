@@ -8,6 +8,8 @@ recipeList:
   - org.openrewrite.java.OrderImports
   - org.openrewrite.staticanalysis.CodeCleanup
   - org.openrewrite.staticanalysis.CommonStaticAnalysis
+  - org.openrewrite.staticanalysis.ReplaceOptionalIsPresentWithIfPresent
+  - org.openrewrite.java.migrate.util.OptionalStreamRecipe
   - org.openrewrite.java.migrate.UpgradeToJava25
   - org.openrewrite.java.spring.boot4.SpringBootProperties_4_0
   - org.openrewrite.java.testing.junit5.JUnit5BestPractices
