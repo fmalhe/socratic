@@ -1,13 +1,37 @@
 spring:
   application:
-    name: app
+    name: socratic
   threads:
     virtual:
       enabled: true
+  datasource:
+    url: jdbc:sqlite:./data/tutor.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      connection-init-sql: PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;
+  jooq:
+    sql-dialect: SQLITE
+  flyway:
+    enabled: true
+  modulith:
+    events:
+      jdbc:
+        schema-initialization:
+          enabled: false
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY:not-configured}
+        chat:
+          options:
+            model: ${GEMINI_MODEL:gemini-2.5-flash}
 
 app:
-  name: ${spring.application.name}
-  version: 0.0.1-SNAPSHOT
+  cors:
+    allowed-origins: http://localhost:3000,http://localhost:5173,http://localhost:4200
+  tts:
+    enabled: true
 
 management:
   endpoints:

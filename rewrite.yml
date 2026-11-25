@@ -4,9 +4,25 @@ name: com.project.CleanAndModernize
 displayName: Clean and modernize Java 25 and Spring Boot 4 project
 description: Applies OpenRewrite static analysis, code cleanup, Java 25 modernization, Spring best practices, and testing best practices.
 recipeList:
+  - org.openrewrite.java.RemoveUnusedImports
+  - org.openrewrite.java.OrderImports
   - org.openrewrite.staticanalysis.CodeCleanup
   - org.openrewrite.staticanalysis.CommonStaticAnalysis
   - org.openrewrite.java.migrate.UpgradeToJava25
   - org.openrewrite.java.spring.boot4.SpringBootProperties_4_0
   - org.openrewrite.java.testing.junit5.JUnit5BestPractices
   - org.openrewrite.java.testing.assertj.Assertj
+---
+type: specs.openrewrite.org/v1beta/style
+name: io.fmalhe.socratic.NoStarImports
+styleConfigs:
+  - org.openrewrite.java.style.ImportLayoutStyle:
+      classCountToUseStarImport: 999
+      nameCountToUseStarImport: 999
+      layout:
+        - import all other imports
+        - <blank line>
+        - import javax.*
+        - import java.*
+        - <blank line>
+        - import static all other imports
