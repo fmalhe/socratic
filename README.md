@@ -54,7 +54,25 @@ curl -s -X POST http://localhost:8080/api/reading/scan \
 ```
 
 ### 3. Homework Helper (`homework`)
+
+Scan a full homework page into persisted exercises and tackle them one by one:
 ```bash
+# Scan homework page -> returns sessionId + ordered exercises with explanations, tricky words, and opening question
+curl -s -X POST http://localhost:8080/api/homework/sessions/scan \
+  -F "image=@/path/to/homework-page.jpg" | jq
+
+# List or resume a homework session
+curl -s http://localhost:8080/api/homework/sessions/1 | jq
+
+# Ping-pong on a single exercise (reading together & explaining without giving away the answer)
+curl -s -X POST http://localhost:8080/api/homework/sessions/1/exercises/1/reply \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hva betyr ordet pequeno-almoço?"}' | jq
+
+# Mark exercise done and move to the next one
+curl -s -X POST http://localhost:8080/api/homework/sessions/1/exercises/1/complete | jq
+
+# Quick one-off question or single-exercise photo
 curl -s -X POST http://localhost:8080/api/homework/help \
   -F "question=O que significa pequeno-almoço?" \
   -F "image=@/path/to/homework.jpg" | jq
