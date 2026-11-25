@@ -1,10 +1,10 @@
 package io.fmalhe.socratic.reading.internal;
 
 import io.fmalhe.socratic.profile.ProfileFacade;
+import io.fmalhe.socratic.profile.ProfileId;
 import io.fmalhe.socratic.reading.ReadingPageResponse;
 import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.NullMarked;
-import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.content.Media;
 import org.springframework.core.io.ByteArrayResource;
@@ -16,17 +16,18 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 @NullMarked
 @Service
 @RequiredArgsConstructor
-class ReadingService {
+public class ReadingService {
 
     private final ProfileFacade profileFacade;
     private final ReadingPromptFactory promptFactory;
     private final ChatClient.Builder chatClientBuilder;
 
-    ReadingPageResponse scanPage(@Nullable Long profileId, MultipartFile image) {
+    public ReadingPageResponse scanPage(ProfileId profileId, MultipartFile image) {
         if (image.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Image file must not be empty");
         }
@@ -40,9 +41,9 @@ class ReadingService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unable to read uploaded image", ex);
         }
 
-        var mimeType = image.getContentType() != null
-                ? MimeTypeUtils.parseMimeType(image.getContentType())
-                : MimeTypeUtils.IMAGE_JPEG;
+        var mimeType = Optional.ofNullable(image.getContentType())
+                .map(MimeTypeUtils::parseMimeType)
+                .orElse(MimeTypeUtils.IMAGE_JPEG);
 
         var media = Media.builder()
                 .mimeType(mimeType)

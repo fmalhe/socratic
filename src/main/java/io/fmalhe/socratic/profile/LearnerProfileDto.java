@@ -4,13 +4,13 @@ import org.jspecify.annotations.NullMarked;
 
 @NullMarked
 public record LearnerProfileDto(
-        long id,
+        ProfileId id,
         String name,
-        int age,
-        String targetLanguageCode,
+        Age age,
+        LanguageCode targetLanguageCode,
         String targetLanguageName,
-        String nativeLanguageCode,
+        LanguageCode nativeLanguageCode,
         String nativeLanguageName,
         String dialectRules,
-        String ttsVoiceName) {
+        TtsVoiceName ttsVoiceName) {
 }

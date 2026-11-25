@@ -1,6 +1,10 @@
 package io.fmalhe.socratic.reading.internal;
 
+import io.fmalhe.socratic.profile.Age;
+import io.fmalhe.socratic.profile.LanguageCode;
 import io.fmalhe.socratic.profile.LearnerProfileDto;
+import io.fmalhe.socratic.profile.ProfileId;
+import io.fmalhe.socratic.profile.TtsVoiceName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,18 +15,18 @@ class ReadingPromptFactoryTest {
 
     @Test
     void injectsProfileLanguageAndDialectRulesDynamically() {
-        LearnerProfileDto profile = new LearnerProfileDto(
-                2L,
+        var profile = new LearnerProfileDto(
+                ProfileId.of(2L),
                 "Kenji",
-                10,
-                "ja-JP",
+                Age.of(10),
+                LanguageCode.of("ja-JP"),
                 "Japanese",
-                "en-GB",
+                LanguageCode.of("en-GB"),
                 "British English",
                 "Use polite desu/masu forms.",
-                "ja-JP-Wavenet-A");
+                TtsVoiceName.of("ja-JP-Wavenet-A"));
 
-        String prompt = factory.renderSystemPrompt(profile);
+        var prompt = factory.renderSystemPrompt(profile);
 
         assertThat(prompt)
                 .contains("10-year-old")

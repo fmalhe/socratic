@@ -1,5 +1,6 @@
 package io.fmalhe.socratic.progress;
 
+import io.fmalhe.socratic.profile.ProfileId;
 import org.jooq.DSLContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +36,7 @@ class ProgressModuleIntegrationTest {
         LocalDate day = LocalDate.of(2026, 11, 25);
 
         scenario.publish(new ActivityCompletedEvent(
-                        1L,
+                        ProfileId.of(1L),
                         ActivityType.READING,
                         10,
                         List.of("borboleta", "pequeno-almoço"),

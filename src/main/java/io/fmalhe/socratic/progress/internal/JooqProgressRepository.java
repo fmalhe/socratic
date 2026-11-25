@@ -1,6 +1,8 @@
 package io.fmalhe.socratic.progress.internal;
 
 import io.fmalhe.socratic.jooq.tables.records.SavedWordRecord;
+import io.fmalhe.socratic.profile.LanguageCode;
+import io.fmalhe.socratic.profile.ProfileId;
 import io.fmalhe.socratic.progress.ProgressResponse;
 import io.fmalhe.socratic.progress.ProgressResponse.SavedWordDto;
 import lombok.RequiredArgsConstructor;
@@ -9,6 +11,7 @@ import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,7 +27,7 @@ class JooqProgressRepository {
 
     private final DSLContext dsl;
 
-    Optional<ChildProgressRow> findChildProgress(long profileId) {
+    Optional<ChildProgressRow> findChildProgress(ProfileId profileId) {
         return dsl.select(
                         CHILD_PROGRESS.PROFILE_ID,
                         CHILD_PROGRESS.TOTAL_STARS,
@@ -32,26 +35,29 @@ class JooqProgressRepository {
                         CHILD_PROGRESS.LAST_ACTIVITY_DATE,
                         CHILD_PROGRESS.PAGES_READ_COUNT)
                 .from(CHILD_PROGRESS)
-                .where(CHILD_PROGRESS.PROFILE_ID.eq(Math.toIntExact(profileId)))
+                .where(CHILD_PROGRESS.PROFILE_ID.eq(profileId.asInt()))
                 .fetchOptional(r -> new ChildProgressRow(
-                        r.get(CHILD_PROGRESS.PROFILE_ID).longValue(),
+                        ProfileId.of(r.get(CHILD_PROGRESS.PROFILE_ID)),
                         r.get(CHILD_PROGRESS.TOTAL_STARS),
                         r.get(CHILD_PROGRESS.CURRENT_STREAK_DAYS),
-                        r.get(CHILD_PROGRESS.LAST_ACTIVITY_DATE),
+                        Optional.ofNullable(r.get(CHILD_PROGRESS.LAST_ACTIVITY_DATE))
+                                .map(LocalDate::parse)
+                                .orElse(null),
                         r.get(CHILD_PROGRESS.PAGES_READ_COUNT)));
     }
 
     void upsertChildProgress(
-            long profileId,
+            ProfileId profileId,
             int totalStars,
             int currentStreakDays,
-            String lastActivityDate,
+            LocalDate lastActivityDate,
             int pagesReadCount) {
-        int id = Math.toIntExact(profileId);
+        int id = profileId.asInt();
+        var dateStr = lastActivityDate.toString();
         int updated = dsl.update(CHILD_PROGRESS)
                 .set(CHILD_PROGRESS.TOTAL_STARS, totalStars)
                 .set(CHILD_PROGRESS.CURRENT_STREAK_DAYS, currentStreakDays)
-                .set(CHILD_PROGRESS.LAST_ACTIVITY_DATE, lastActivityDate)
+                .set(CHILD_PROGRESS.LAST_ACTIVITY_DATE, dateStr)
                 .set(CHILD_PROGRESS.PAGES_READ_COUNT, pagesReadCount)
                 .where(CHILD_PROGRESS.PROFILE_ID.eq(id))
                 .execute();
@@ -60,17 +66,17 @@ class JooqProgressRepository {
                     .set(CHILD_PROGRESS.PROFILE_ID, id)
                     .set(CHILD_PROGRESS.TOTAL_STARS, totalStars)
                     .set(CHILD_PROGRESS.CURRENT_STREAK_DAYS, currentStreakDays)
-                    .set(CHILD_PROGRESS.LAST_ACTIVITY_DATE, lastActivityDate)
+                    .set(CHILD_PROGRESS.LAST_ACTIVITY_DATE, dateStr)
                     .set(CHILD_PROGRESS.PAGES_READ_COUNT, pagesReadCount)
                     .execute();
         }
     }
 
-    void insertSavedWords(long profileId, String languageCode, List<String> words) {
+    void insertSavedWords(ProfileId profileId, LanguageCode languageCode, List<String> words) {
         if (words.isEmpty()) {
             return;
         }
-        int id = Math.toIntExact(profileId);
+        int id = profileId.asInt();
         List<SavedWordRecord> records = words.stream()
                 .map(String::trim)
                 .filter(w -> !w.isEmpty())
@@ -78,7 +84,7 @@ class JooqProgressRepository {
                     SavedWordRecord record = dsl.newRecord(SAVED_WORD);
                     record.setProfileId(id);
                     record.setWord(word);
-                    record.setLanguageCode(languageCode);
+                    record.setLanguageCode(languageCode.value());
                     return record;
                 })
                 .toList();
@@ -87,41 +93,79 @@ class JooqProgressRepository {
         }
     }
 
-    List<SavedWordDto> findRecentWords(long profileId) {
+    List<SavedWordDto> findRecentWords(ProfileId profileId) {
         return dsl.select(
                         SAVED_WORD.ID,
                         SAVED_WORD.WORD,
                         SAVED_WORD.LANGUAGE_CODE,
                         SAVED_WORD.CREATED_AT)
                 .from(SAVED_WORD)
-                .where(SAVED_WORD.PROFILE_ID.eq(Math.toIntExact(profileId)))
+                .where(SAVED_WORD.PROFILE_ID.eq(profileId.asInt()))
                 .orderBy(SAVED_WORD.CREATED_AT.desc(), SAVED_WORD.ID.desc())
                 .limit(RECENT_WORDS_LIMIT)
                 .fetch(r -> new SavedWordDto(
                         r.get(SAVED_WORD.ID).longValue(),
                         r.get(SAVED_WORD.WORD),
-                        r.get(SAVED_WORD.LANGUAGE_CODE),
+                        LanguageCode.of(r.get(SAVED_WORD.LANGUAGE_CODE)),
                         r.get(SAVED_WORD.CREATED_AT)));
     }
 
-    ProgressResponse findProgressResponse(long profileId) {
-        ChildProgressRow row = findChildProgress(profileId)
-                .orElse(new ChildProgressRow(profileId, 0, 0, null, 0));
-        List<SavedWordDto> recentWords = findRecentWords(profileId);
+    ProgressResponse findProgressResponse(ProfileId profileId) {
+        var row = findChildProgress(profileId)
+                .orElse(ChildProgressRow.empty(profileId));
+        var recentWords = findRecentWords(profileId);
         return new ProgressResponse(
                 row.profileId(),
                 row.totalStars(),
                 row.currentStreakDays(),
-                row.lastActivityDate(),
+                row.lastActivityDate().orElse(null),
                 row.pagesReadCount(),
                 recentWords);
     }
 
-    record ChildProgressRow(
-            long profileId,
-            int totalStars,
-            int currentStreakDays,
-            @Nullable String lastActivityDate,
-            int pagesReadCount) {
+    static final class ChildProgressRow {
+
+        private final ProfileId profileId;
+        private final int totalStars;
+        private final int currentStreakDays;
+        private final @Nullable LocalDate lastActivityDate;
+        private final int pagesReadCount;
+
+        ChildProgressRow(
+                ProfileId profileId,
+                int totalStars,
+                int currentStreakDays,
+                @Nullable LocalDate lastActivityDate,
+                int pagesReadCount) {
+            this.profileId = profileId;
+            this.totalStars = totalStars;
+            this.currentStreakDays = currentStreakDays;
+            this.lastActivityDate = lastActivityDate;
+            this.pagesReadCount = pagesReadCount;
+        }
+
+        static ChildProgressRow empty(ProfileId profileId) {
+            return new ChildProgressRow(profileId, 0, 0, null, 0);
+        }
+
+        ProfileId profileId() {
+            return profileId;
+        }
+
+        int totalStars() {
+            return totalStars;
+        }
+
+        int currentStreakDays() {
+            return currentStreakDays;
+        }
+
+        Optional<LocalDate> lastActivityDate() {
+            return Optional.ofNullable(lastActivityDate);
+        }
+
+        int pagesReadCount() {
+            return pagesReadCount;
+        }
     }
 }

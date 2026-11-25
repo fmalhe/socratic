@@ -9,7 +9,7 @@ import java.util.Map;
 
 @NullMarked
 @Component
-class HomeworkPromptFactory {
+public class HomeworkPromptFactory {
 
     private static final String TEMPLATE = """
             You are a patient, Socratic homework tutor helping a {age}-year-old child who is learning {targetLanguageName}.
@@ -27,7 +27,7 @@ class HomeworkPromptFactory {
 
     String renderSystemPrompt(LearnerProfileDto profile) {
         return new PromptTemplate(TEMPLATE).render(Map.of(
-                "age", profile.age(),
+                "age", profile.age().value(),
                 "targetLanguageName", profile.targetLanguageName(),
                 "nativeLanguageName", profile.nativeLanguageName(),
                 "dialectRules", profile.dialectRules()));

@@ -1,58 +1,53 @@
 package io.fmalhe.socratic.homework.internal;
 
+import io.fmalhe.socratic.homework.HomeworkHelpRequest;
 import io.fmalhe.socratic.homework.HomeworkHelpResponse;
+import io.fmalhe.socratic.homework.HomeworkQuestion;
 import io.fmalhe.socratic.profile.ProfileFacade;
+import io.fmalhe.socratic.profile.ProfileId;
 import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.NullMarked;
-import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.content.Media;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeTypeUtils;
-import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 @NullMarked
 @Service
 @RequiredArgsConstructor
-class HomeworkService {
+public class HomeworkService {
 
     private final ProfileFacade profileFacade;
     private final HomeworkPromptFactory promptFactory;
     private final ChatClient.Builder chatClientBuilder;
 
-    HomeworkHelpResponse help(
-            @Nullable Long profileId,
-            @Nullable MultipartFile image,
-            @Nullable String question) {
-        var hasImage = image != null && !image.isEmpty();
-        var hasQuestion = StringUtils.hasText(question);
-        if (!hasImage && !hasQuestion) {
+    public HomeworkHelpResponse help(ProfileId profileId, HomeworkHelpRequest request) {
+        if (request.image().isEmpty() && request.question().isEmpty()) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST, "Either an image or a question must be provided");
         }
 
         var profile = profileFacade.getActiveProfile(profileId);
         var systemPrompt = promptFactory.renderSystemPrompt(profile);
-        var userText = hasQuestion
-                ? question
-                : "Please explain this homework exercise without giving away the answer.";
+        var userText = request.question()
+                .map(HomeworkQuestion::value)
+                .orElse("Please explain this homework exercise without giving away the answer.");
 
-        var media = hasImage ? toMedia(image) : null;
+        var media = request.image().map(HomeworkService::toMedia);
 
         var result = chatClientBuilder.build().prompt()
                 .system(systemPrompt)
                 .user(u -> {
                     u.text(userText);
-                    if (media != null) {
-                        u.media(media);
-                    }
+                    media.ifPresent(u::media);
                 })
                 .call()
                 .entity(HomeworkHelpResponse.class);
@@ -67,9 +62,9 @@ class HomeworkService {
         } catch (IOException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unable to read uploaded image", ex);
         }
-        var mimeType = image.getContentType() != null
-                ? MimeTypeUtils.parseMimeType(image.getContentType())
-                : MimeTypeUtils.IMAGE_JPEG;
+        var mimeType = Optional.ofNullable(image.getContentType())
+                .map(MimeTypeUtils::parseMimeType)
+                .orElse(MimeTypeUtils.IMAGE_JPEG);
         return Media.builder()
                 .mimeType(mimeType)
                 .data(new ByteArrayResource(bytes))

@@ -26,28 +26,28 @@ class ProfileModuleIntegrationTest {
 
     @Test
     void loadsSeededDefaultPtPtProfileAndUpdatesIt() {
-        LearnerProfileDto seeded = profileFacade.getActiveProfile();
+        var seeded = profileFacade.getActiveProfile();
 
-        assertThat(seeded.id()).isOne();
-        assertThat(seeded.age()).isEqualTo(8);
-        assertThat(seeded.targetLanguageCode()).isEqualTo("pt-PT");
-        assertThat(seeded.nativeLanguageCode()).isEqualTo("nb-NO");
+        assertThat(seeded.id()).isEqualTo(ProfileId.DEFAULT);
+        assertThat(seeded.age()).isEqualTo(Age.of(8));
+        assertThat(seeded.targetLanguageCode()).isEqualTo(LanguageCode.of("pt-PT"));
+        assertThat(seeded.nativeLanguageCode()).isEqualTo(LanguageCode.of("nb-NO"));
         assertThat(seeded.dialectRules()).contains("European Portuguese (PT-PT)");
 
-        LearnerProfileDto updated = profileFacade.updateActiveProfile(
-                1L,
+        var updated = profileFacade.updateActiveProfile(
+                ProfileId.of(1L),
                 new UpdateLearnerProfileRequest(
                         "Mateus",
-                        9,
-                        "pt-PT",
+                        Age.of(9),
+                        LanguageCode.of("pt-PT"),
                         "European Portuguese",
-                        "nb-NO",
+                        LanguageCode.of("nb-NO"),
                         "Norwegian",
                         seeded.dialectRules(),
-                        "pt-PT-Wavenet-B"));
+                        TtsVoiceName.of("pt-PT-Wavenet-B")));
 
         assertThat(updated.name()).isEqualTo("Mateus");
-        assertThat(updated.age()).isEqualTo(9);
-        assertThat(updated.ttsVoiceName()).isEqualTo("pt-PT-Wavenet-B");
+        assertThat(updated.age()).isEqualTo(Age.of(9));
+        assertThat(updated.ttsVoiceName()).isEqualTo(TtsVoiceName.of("pt-PT-Wavenet-B"));
     }
 }

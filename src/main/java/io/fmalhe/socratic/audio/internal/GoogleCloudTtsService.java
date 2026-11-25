@@ -8,6 +8,8 @@ import com.google.cloud.texttospeech.v1.TextToSpeechClient;
 import com.google.cloud.texttospeech.v1.VoiceSelectionParams;
 import io.fmalhe.socratic.audio.TtsNotConfiguredException;
 import io.fmalhe.socratic.audio.TtsService;
+import io.fmalhe.socratic.profile.LanguageCode;
+import io.fmalhe.socratic.profile.TtsVoiceName;
 import jakarta.annotation.PreDestroy;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
@@ -31,7 +33,7 @@ class GoogleCloudTtsService implements TtsService {
     }
 
     @Override
-    public byte[] synthesize(String text, String languageCode, String voiceName, boolean slow) {
+    public byte[] synthesize(String text, LanguageCode languageCode, TtsVoiceName voiceName, boolean slow) {
         if (!enabled) {
             throw new TtsNotConfiguredException("Google Cloud TTS is disabled; use browser speechSynthesis fallback");
         }
@@ -42,8 +44,8 @@ class GoogleCloudTtsService implements TtsService {
                 .build();
 
         VoiceSelectionParams voice = VoiceSelectionParams.newBuilder()
-                .setLanguageCode(languageCode)
-                .setName(voiceName)
+                .setLanguageCode(languageCode.value())
+                .setName(voiceName.value())
                 .build();
 
         AudioConfig audioConfig = AudioConfig.newBuilder()

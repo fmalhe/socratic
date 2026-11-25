@@ -1,18 +1,17 @@
 package io.fmalhe.socratic.profile;
 
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import org.jspecify.annotations.NullMarked;
 
 @NullMarked
 public record UpdateLearnerProfileRequest(
         @NotBlank String name,
-        @Min(3) @Max(18) int age,
-        @NotBlank String targetLanguageCode,
+        @NotNull Age age,
+        @NotNull LanguageCode targetLanguageCode,
         @NotBlank String targetLanguageName,
-        @NotBlank String nativeLanguageCode,
+        @NotNull LanguageCode nativeLanguageCode,
         @NotBlank String nativeLanguageName,
         @NotBlank String dialectRules,
-        @NotBlank String ttsVoiceName) {
+        @NotNull TtsVoiceName ttsVoiceName) {
 }

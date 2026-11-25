@@ -1,6 +1,10 @@
 package io.fmalhe.socratic.homework.internal;
 
+import io.fmalhe.socratic.profile.Age;
+import io.fmalhe.socratic.profile.LanguageCode;
 import io.fmalhe.socratic.profile.LearnerProfileDto;
+import io.fmalhe.socratic.profile.ProfileId;
+import io.fmalhe.socratic.profile.TtsVoiceName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,18 +15,18 @@ class HomeworkPromptFactoryTest {
 
     @Test
     void injectsProfileLanguageAndDialectRulesDynamically() {
-        LearnerProfileDto profile = new LearnerProfileDto(
-                1L,
+        var profile = new LearnerProfileDto(
+                ProfileId.of(1L),
                 "Sofia",
-                8,
-                "pt-PT",
+                Age.of(8),
+                LanguageCode.of("pt-PT"),
                 "European Portuguese",
-                "nb-NO",
+                LanguageCode.of("nb-NO"),
                 "Norwegian",
                 "Use tu forms and PT-PT vocabulary.",
-                "pt-PT-Wavenet-A");
+                TtsVoiceName.of("pt-PT-Wavenet-A"));
 
-        String prompt = factory.renderSystemPrompt(profile);
+        var prompt = factory.renderSystemPrompt(profile);
 
         assertThat(prompt)
                 .contains("8-year-old")

@@ -1,8 +1,14 @@
-package io.fmalhe.socratic.homework.internal;
+package io.fmalhe.socratic.homework.web;
 
 import io.fmalhe.socratic.homework.HomeworkHelpResponse;
+import io.fmalhe.socratic.homework.internal.HomeworkPromptFactory;
+import io.fmalhe.socratic.homework.internal.HomeworkService;
+import io.fmalhe.socratic.profile.Age;
+import io.fmalhe.socratic.profile.LanguageCode;
 import io.fmalhe.socratic.profile.LearnerProfileDto;
 import io.fmalhe.socratic.profile.ProfileFacade;
+import io.fmalhe.socratic.profile.ProfileId;
+import io.fmalhe.socratic.profile.TtsVoiceName;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,20 +43,20 @@ class HomeworkControllerTest {
 
     @Test
     void helpsWithHomeworkQuestionWithoutGivingAnswer() throws Exception {
-        given(profileFacade.getActiveProfile(null)).willReturn(new LearnerProfileDto(
-                1L,
+        given(profileFacade.getActiveProfile(ProfileId.DEFAULT)).willReturn(new LearnerProfileDto(
+                ProfileId.DEFAULT,
                 "Sofia",
-                8,
-                "pt-PT",
+                Age.of(8),
+                LanguageCode.of("pt-PT"),
                 "European Portuguese",
-                "nb-NO",
+                LanguageCode.of("nb-NO"),
                 "Norwegian",
                 "Use PT-PT.",
-                "pt-PT-Wavenet-A"));
+                TtsVoiceName.of("pt-PT-Wavenet-A")));
 
-        ChatClient chatClient = mock(ChatClient.class);
-        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
-        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        var chatClient = mock(ChatClient.class);
+        var requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        var callResponseSpec = mock(ChatClient.CallResponseSpec.class);
 
         given(chatClientBuilder.build()).willReturn(chatClient);
         given(chatClient.prompt()).willReturn(requestSpec);

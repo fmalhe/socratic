@@ -1,10 +1,16 @@
-package io.fmalhe.socratic.reading.internal;
+package io.fmalhe.socratic.reading.web;
 
+import io.fmalhe.socratic.profile.Age;
+import io.fmalhe.socratic.profile.LanguageCode;
 import io.fmalhe.socratic.profile.LearnerProfileDto;
 import io.fmalhe.socratic.profile.ProfileFacade;
+import io.fmalhe.socratic.profile.ProfileId;
+import io.fmalhe.socratic.profile.TtsVoiceName;
 import io.fmalhe.socratic.reading.ReadingPageResponse;
 import io.fmalhe.socratic.reading.ReadingPageResponse.SentenceItem;
 import io.fmalhe.socratic.reading.ReadingPageResponse.WordHint;
+import io.fmalhe.socratic.reading.internal.ReadingPromptFactory;
+import io.fmalhe.socratic.reading.internal.ReadingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,20 +47,20 @@ class ReadingControllerTest {
 
     @Test
     void scansBookPageAndReturnsStructuredReadingResponse() throws Exception {
-        given(profileFacade.getActiveProfile(null)).willReturn(new LearnerProfileDto(
-                1L,
+        given(profileFacade.getActiveProfile(ProfileId.DEFAULT)).willReturn(new LearnerProfileDto(
+                ProfileId.DEFAULT,
                 "Sofia",
-                8,
-                "pt-PT",
+                Age.of(8),
+                LanguageCode.of("pt-PT"),
                 "European Portuguese",
-                "nb-NO",
+                LanguageCode.of("nb-NO"),
                 "Norwegian",
                 "Use PT-PT.",
-                "pt-PT-Wavenet-A"));
+                TtsVoiceName.of("pt-PT-Wavenet-A")));
 
-        ChatClient chatClient = mock(ChatClient.class);
-        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
-        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        var chatClient = mock(ChatClient.class);
+        var requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        var callResponseSpec = mock(ChatClient.CallResponseSpec.class);
 
         given(chatClientBuilder.build()).willReturn(chatClient);
         given(chatClient.prompt()).willReturn(requestSpec);
@@ -68,7 +74,7 @@ class ReadingControllerTest {
                         "Sommerfuglen flyr.",
                         List.of(new WordHint("borboleta", "bor-bo-le-ta", "sommerfugl"))))));
 
-        MockMultipartFile image = new MockMultipartFile(
+        var image = new MockMultipartFile(
                 "image",
                 "page.jpg",
                 MediaType.IMAGE_JPEG_VALUE,

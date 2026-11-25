@@ -9,7 +9,7 @@ import java.util.Map;
 
 @NullMarked
 @Component
-class ReadingPromptFactory {
+public class ReadingPromptFactory {
 
     private static final String TEMPLATE = """
             You are a warm, encouraging reading tutor helping a {age}-year-old child learn {targetLanguageName}.
@@ -32,7 +32,7 @@ class ReadingPromptFactory {
 
     String renderSystemPrompt(LearnerProfileDto profile) {
         return new PromptTemplate(TEMPLATE).render(Map.of(
-                "age", profile.age(),
+                "age", profile.age().value(),
                 "targetLanguageName", profile.targetLanguageName(),
                 "nativeLanguageName", profile.nativeLanguageName(),
                 "dialectRules", profile.dialectRules()));
