@@ -1,5 +1,6 @@
 package io.fmalhe.socratic.audio.web;
 
+import io.fmalhe.socratic.audio.SynthesizedAudio;
 import io.fmalhe.socratic.audio.TtsNotConfiguredException;
 import io.fmalhe.socratic.audio.TtsService;
 import io.fmalhe.socratic.profile.Age;
@@ -48,7 +49,7 @@ class AudioControllerTest {
         given(profileFacade.getActiveProfile(ProfileId.DEFAULT)).willReturn(PROFILE);
         given(ttsService.synthesize(
                 "Olá!", LanguageCode.of("pt-PT"), TtsVoiceName.of("pt-PT-Wavenet-A"), true))
-                .willReturn(new byte[]{10, 20, 30});
+                .willReturn(SynthesizedAudio.mp3(new byte[]{10, 20, 30}));
 
         mockMvc.perform(post("/api/audio/speak")
                         .contentType(MediaType.APPLICATION_JSON)

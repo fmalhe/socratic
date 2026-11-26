@@ -7,5 +7,5 @@ import org.jspecify.annotations.NullMarked;
 @NullMarked
 public interface TtsService {
 
-    byte[] synthesize(String text, LanguageCode languageCode, TtsVoiceName voiceName, boolean slow);
+    SynthesizedAudio synthesize(String text, LanguageCode languageCode, TtsVoiceName voiceName, boolean slow);
 }

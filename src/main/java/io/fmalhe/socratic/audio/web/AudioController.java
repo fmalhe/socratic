@@ -7,7 +7,7 @@ import io.fmalhe.socratic.profile.ProfileId;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.NullMarked;
-import org.springframework.http.MediaType;
+import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,18 +20,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 class AudioController {
 
-    private static final MediaType AUDIO_MPEG = MediaType.parseMediaType("audio/mpeg");
-
     private final ProfileFacade profileFacade;
     private final TtsService ttsService;
 
     @PostMapping("/speak")
-    ResponseEntity<byte[]> speak(ProfileId profileId, @Valid @RequestBody SpeakRequest request) {
+    ResponseEntity<Resource> speak(ProfileId profileId, @Valid @RequestBody SpeakRequest request) {
         var profile = profileFacade.getActiveProfile(profileId);
         var languageCode = request.getLanguageCode().orElse(profile.targetLanguageCode());
         var audio = ttsService.synthesize(request.getText(), languageCode, profile.ttsVoiceName(), request.isSlow());
         return ResponseEntity.ok()
-                .contentType(AUDIO_MPEG)
-                .body(audio);
+                .contentType(audio.mediaType())
+                .body(audio.content());
     }
 }
