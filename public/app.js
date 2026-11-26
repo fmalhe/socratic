@@ -389,6 +389,7 @@ async function loadProfile() {
   $('learner-subtitle').textContent = `${p.name} · ${flagForLanguage(p.targetLanguageCode)} → ${flagForLanguage(p.nativeLanguageCode)}`;
   $('flag-q-target').textContent = flagForLanguage(p.targetLanguageCode);
   $('flag-q-native').textContent = flagForLanguage(p.nativeLanguageCode);
+  $('flag-hw-text').textContent = flagForLanguage(p.targetLanguageCode);
   $('flag-exp-native').textContent = flagForLanguage(p.nativeLanguageCode);
   $('flag-exp-target').textContent = flagForLanguage(p.targetLanguageCode);
   $('prof-name').value = p.name;
@@ -1195,6 +1196,20 @@ function renderHomeworkWorkspace() {
 
   const stepper = $('hw-exercise-stepper');
   stepper.innerHTML = '';
+
+  const hasPageText = Boolean(session.pageTextTarget && session.pageTextTarget.trim());
+  if (hasPageText) {
+    const textBtn = document.createElement('button');
+    textBtn.type = 'button';
+    textBtn.className = 'step-btn' + (state.activeExerciseIndex === -1 ? ' is-active' : '');
+    textBtn.textContent = '📖 Text';
+    textBtn.addEventListener('click', () => {
+      state.activeExerciseIndex = -1;
+      renderHomeworkWorkspace();
+    });
+    stepper.appendChild(textBtn);
+  }
+
   session.exercises.forEach((ex, idx) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1209,7 +1224,32 @@ function renderHomeworkWorkspace() {
     stepper.appendChild(btn);
   });
 
-  const ex = session.exercises[state.activeExerciseIndex];
+  const textCard = $('hw-text-card');
+  const exCard = $('hw-active-exercise');
+  if (state.activeExerciseIndex === -1 && hasPageText) {
+    textCard.hidden = false;
+    exCard.hidden = true;
+    const body = $('hw-page-text');
+    body.innerHTML = '';
+    const lines = session.pageTextTarget
+      .split(/\n+/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    lines.forEach((line) => {
+      const p = document.createElement('p');
+      p.className = 'hw-text-line';
+      p.textContent = line;
+      p.title = 'Tap to listen';
+      p.addEventListener('click', () => speakText(line, false, state.profile?.targetLanguageCode));
+      body.appendChild(p);
+    });
+    return;
+  }
+
+  textCard.hidden = true;
+  exCard.hidden = false;
+
+  const ex = session.exercises[state.activeExerciseIndex] || session.exercises[0];
   $('hw-ex-badge').textContent = `Exercise ${ex.label}`;
   const statusEl = $('hw-ex-status');
   statusEl.textContent = ex.status;
@@ -1372,6 +1412,12 @@ function init() {
     const session = state.activeSession;
     const url = session?.imageUrl || (session ? state.localSessionPhotos.get(session.id) : null);
     openPhotoDialog(url);
+  });
+  $('btn-hw-text-listen').addEventListener('click', () => {
+    speakText(state.activeSession?.pageTextTarget, false, state.profile?.targetLanguageCode);
+  });
+  $('btn-hw-text-slow').addEventListener('click', () => {
+    speakText(state.activeSession?.pageTextTarget, true, state.profile?.targetLanguageCode);
   });
   $('btn-hw-listen').addEventListener('click', () => {
     const ex = state.activeSession?.exercises[state.activeExerciseIndex];

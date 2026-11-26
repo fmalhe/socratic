@@ -983,6 +983,30 @@ body {
   gap: 12px;
 }
 
+.hw-text-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hw-text-line {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 1.24rem;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: -0.018em;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.14s var(--ease);
+}
+
+.hw-text-line:hover,
+.hw-text-line:active {
+  background: var(--surface-muted);
+}
+
 .audio-hint-strip {
   display: flex;
   flex-direction: column;
