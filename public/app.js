@@ -814,10 +814,25 @@ const lyricsPlayer = createLyricsPlayer();
 const readingProgress = createScanProgress('reading');
 const homeworkProgress = createScanProgress('homework');
 
+function showScanError(prefix, message) {
+  const banner = $(`${prefix}-error`);
+  const msgEl = $(`${prefix}-error-msg`);
+  if (banner && msgEl) {
+    msgEl.textContent = message || 'Unknown error';
+    banner.hidden = false;
+  }
+}
+
+function clearScanError(prefix) {
+  const banner = $(`${prefix}-error`);
+  if (banner) banner.hidden = true;
+}
+
 /* Reading Flow */
 async function handleReadingUpload(file) {
   if (!file) return;
   lyricsPlayer.stop();
+  clearScanError('reading');
   const localUrl = URL.createObjectURL(file);
   if (state.readingPreviewUrl) {
     URL.revokeObjectURL(state.readingPreviewUrl);
@@ -849,7 +864,8 @@ async function handleReadingUpload(file) {
     renderReadingPage();
   } catch (err) {
     readingProgress.hide();
-    showToast(`Could not scan page: ${err.message}`);
+    showScanError('reading', err.message);
+    showToast('Scan failed — see error details above.');
   }
 }
 
@@ -1009,6 +1025,7 @@ function renderSessionChips() {
 
 async function handleHomeworkScan(file) {
   if (!file) return;
+  clearScanError('homework');
   const localUrl = URL.createObjectURL(file);
   homeworkProgress.start(localUrl);
   try {
@@ -1042,7 +1059,8 @@ async function handleHomeworkScan(file) {
   } catch (err) {
     URL.revokeObjectURL(localUrl);
     homeworkProgress.hide();
-    showToast(`Could not scan homework: ${err.message}`);
+    showScanError('homework', err.message);
+    showToast('Scan failed — see error details above.');
   }
 }
 
@@ -1296,6 +1314,19 @@ function init() {
   $('btn-photo-close').addEventListener('click', () => $('photo-dialog').close());
   $('photo-dialog').addEventListener('click', (e) => {
     if (e.target === $('photo-dialog')) $('photo-dialog').close();
+  });
+
+  ['reading', 'homework'].forEach((prefix) => {
+    $(`btn-${prefix}-error-close`).addEventListener('click', () => clearScanError(prefix));
+    $(`btn-${prefix}-error-copy`).addEventListener('click', async () => {
+      const text = $(`${prefix}-error-msg`).textContent || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Error copied to clipboard');
+      } catch {
+        showToast('Select and copy the error text above');
+      }
+    });
   });
 
   /* Theme Toggle (Obsidian Dark default / Alabaster Light) */

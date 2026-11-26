@@ -1353,6 +1353,48 @@ dialog {
   z-index: 100;
 }
 
+.error-banner {
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border-color: var(--accent-ring);
+  background: var(--accent-tint);
+}
+
+.error-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.error-banner-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.error-banner-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.error-banner-msg {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

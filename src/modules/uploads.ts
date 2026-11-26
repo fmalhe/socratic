@@ -23,22 +23,27 @@ export async function storeUploadedImage(
   if (!env.UPLOADS) {
     return { imageKey: null, imageUrl: null };
   }
-  const contentType = file.type || "image/jpeg";
-  const ext = extensionForMime(contentType);
-  const imageKey = `${folder}/${crypto.randomUUID()}.${ext}`;
-  const bytes = await file.arrayBuffer();
+  try {
+    const contentType = file.type || "image/jpeg";
+    const ext = extensionForMime(contentType);
+    const imageKey = `${folder}/${crypto.randomUUID()}.${ext}`;
+    const bytes = await file.arrayBuffer();
 
-  await env.UPLOADS.put(imageKey, bytes, {
-    httpMetadata: {
-      contentType,
-      cacheControl: "private, max-age=86400",
-    },
-  });
+    await env.UPLOADS.put(imageKey, bytes, {
+      httpMetadata: {
+        contentType,
+        cacheControl: "private, max-age=86400",
+      },
+    });
 
-  return {
-    imageKey,
-    imageUrl: buildUploadUrl(imageKey),
-  };
+    return {
+      imageKey,
+      imageUrl: buildUploadUrl(imageKey),
+    };
+  } catch (err) {
+    console.error("R2 upload failed (non-fatal):", err);
+    return { imageKey: null, imageUrl: null };
+  }
 }
 
 export const uploadRoutes = new Hono<{ Bindings: Env }>();

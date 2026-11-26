@@ -137,6 +137,9 @@ export async function callGeminiStructured<T>(
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: params.responseSchema,
+        thinkingConfig: {
+          thinkingLevel: "LOW",
+        },
       },
     }),
   });
@@ -147,11 +150,29 @@ export async function callGeminiStructured<T>(
   }
 
   const data = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    candidates?: Array<{
+      finishReason?: string;
+      content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+    }>;
   };
-  const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!jsonText) {
-    throw new Error("Gemini returned an empty response");
+  const responseParts = data.candidates?.[0]?.content?.parts ?? [];
+  const rawText =
+    responseParts.find((p) => !p.thought && typeof p.text === "string")?.text ??
+    responseParts.find((p) => typeof p.text === "string")?.text;
+
+  if (!rawText) {
+    const reason = data.candidates?.[0]?.finishReason ?? "unknown";
+    throw new Error(`Gemini returned an empty response (finishReason: ${reason})`);
   }
-  return JSON.parse(jsonText) as T;
+
+  const cleaned = rawText
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch (err) {
+    throw new Error(`Gemini returned invalid JSON: ${(err as Error).message}`);
+  }
 }
