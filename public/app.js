@@ -6,6 +6,7 @@ const state = {
   homeworkSessions: [],
   activeSession: null,
   activeExerciseIndex: 0,
+  explanationLang: 'native',
   activeWord: null,
   localSessionPhotos: new Map(),
 };
@@ -268,10 +269,26 @@ function openPhotoDialog(url) {
   $('photo-dialog').showModal();
 }
 
+function flagForLanguage(code) {
+  const norm = (code || '').toLowerCase();
+  if (norm.startsWith('nb') || norm.startsWith('nn') || norm === 'no') return '🇳🇴';
+  if (norm === 'pt-br') return '🇧🇷';
+  if (norm.startsWith('pt')) return '🇵🇹';
+  if (norm === 'en-gb') return '🇬🇧';
+  if (norm.startsWith('en')) return '🇺🇸';
+  if (norm.startsWith('es')) return '🇪🇸';
+  if (norm.startsWith('fr')) return '🇫🇷';
+  if (norm.startsWith('de')) return '🇩🇪';
+  if (norm.startsWith('sv')) return '🇸🇪';
+  if (norm.startsWith('da')) return '🇩🇰';
+  if (norm.startsWith('it')) return '🇮🇹';
+  return '🌐';
+}
+
 /* Cached cloud TTS fetcher (Gemini 3.8 Flash-Lite TTS / Google Cloud TTS + R2 cache) */
 const ttsAudioCache = new Map();
-async function fetchTtsAudio(text, slow = false) {
-  const langCode = state.profile?.targetLanguageCode || 'pt-PT';
+async function fetchTtsAudio(text, slow = false, languageCodeOverride = null) {
+  const langCode = languageCodeOverride || state.profile?.targetLanguageCode || 'pt-PT';
   const voice = state.profile?.ttsVoiceName || '';
   const key = `${langCode}|${voice}|${slow ? '1' : '0'}|${text}`;
   if (ttsAudioCache.has(key)) {
@@ -311,7 +328,7 @@ async function fetchTtsAudio(text, slow = false) {
 
 /* Safari & Android Chrome/Brave friendly TTS with automatic speechSynthesis fallback */
 let currentAudio = null;
-async function speakText(text, slow = false) {
+async function speakText(text, slow = false, languageCodeOverride = null) {
   if (!text) return;
   if (typeof lyricsPlayer !== 'undefined' && lyricsPlayer.isActive()) {
     lyricsPlayer.stop();
@@ -324,7 +341,8 @@ async function speakText(text, slow = false) {
     window.speechSynthesis.cancel();
   }
 
-  const clip = await fetchTtsAudio(text, slow);
+  const langCode = languageCodeOverride || state.profile?.targetLanguageCode || 'pt-PT';
+  const clip = await fetchTtsAudio(text, slow, langCode);
   if (clip?.url) {
     const audio = new Audio(clip.url);
     currentAudio = audio;
@@ -333,7 +351,6 @@ async function speakText(text, slow = false) {
   }
 
   if (window.speechSynthesis) {
-    const langCode = state.profile?.targetLanguageCode || 'pt-PT';
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = langCode;
     const voice = pickBestVoice(langCode);
@@ -369,7 +386,11 @@ function switchTab(tabName) {
 async function loadProfile() {
   state.profile = await apiJson('/api/profile');
   const p = state.profile;
-  $('learner-subtitle').textContent = `${p.name} · ${p.targetLanguageName} → ${p.nativeLanguageName}`;
+  $('learner-subtitle').textContent = `${p.name} · ${flagForLanguage(p.targetLanguageCode)} → ${flagForLanguage(p.nativeLanguageCode)}`;
+  $('flag-exp-native').textContent = flagForLanguage(p.nativeLanguageCode);
+  $('flag-exp-target').textContent = flagForLanguage(p.targetLanguageCode);
+  $('btn-exp-native').title = p.nativeLanguageName;
+  $('btn-exp-target').title = p.targetLanguageName;
   $('prof-name').value = p.name;
   $('prof-age').value = p.age;
   $('prof-target-code').value = p.targetLanguageCode;
@@ -1072,6 +1093,33 @@ function selectHomeworkSession(session) {
   renderHomeworkWorkspace();
 }
 
+function renderHomeworkExplanation(ex) {
+  const hasTarget = Boolean(ex?.explanationTarget && ex.explanationTarget.trim());
+  const useTarget = state.explanationLang === 'target' && hasTarget;
+
+  const nativeBtn = $('btn-exp-native');
+  const targetBtn = $('btn-exp-target');
+  nativeBtn.classList.toggle('is-active', !useTarget);
+  nativeBtn.setAttribute('aria-pressed', String(!useTarget));
+  targetBtn.classList.toggle('is-active', useTarget);
+  targetBtn.setAttribute('aria-pressed', String(useTarget));
+  targetBtn.disabled = !hasTarget;
+
+  $('hw-ex-explanation').textContent = useTarget ? ex.explanationTarget : ex.explanationNative;
+}
+
+function speakActiveExplanation(slow = false) {
+  const ex = state.activeSession?.exercises[state.activeExerciseIndex];
+  if (!ex) return;
+  const hasTarget = Boolean(ex.explanationTarget && ex.explanationTarget.trim());
+  const useTarget = state.explanationLang === 'target' && hasTarget;
+  const text = useTarget ? ex.explanationTarget : ex.explanationNative;
+  const langCode = useTarget
+    ? state.profile?.targetLanguageCode || 'pt-PT'
+    : state.profile?.nativeLanguageCode || 'nb-NO';
+  speakText(text, slow, langCode);
+}
+
 function renderHomeworkWorkspace() {
   const session = state.activeSession;
   if (!session || !session.exercises.length) {
@@ -1112,7 +1160,7 @@ function renderHomeworkWorkspace() {
   statusEl.textContent = ex.status;
   statusEl.classList.toggle('is-completed', ex.status === 'COMPLETED');
   $('hw-ex-target').textContent = ex.promptTarget;
-  $('hw-ex-explanation').textContent = ex.explanationNative;
+  renderHomeworkExplanation(ex);
 
   const wordsRow = $('hw-ex-words');
   wordsRow.innerHTML = '';
@@ -1296,12 +1344,25 @@ function init() {
   });
   $('btn-hw-listen').addEventListener('click', () => {
     const ex = state.activeSession?.exercises[state.activeExerciseIndex];
-    speakText(ex?.promptTarget, false);
+    speakText(ex?.promptTarget, false, state.profile?.targetLanguageCode);
   });
   $('btn-hw-slow').addEventListener('click', () => {
     const ex = state.activeSession?.exercises[state.activeExerciseIndex];
-    speakText(ex?.promptTarget, true);
+    speakText(ex?.promptTarget, true, state.profile?.targetLanguageCode);
   });
+  $('btn-exp-native').addEventListener('click', () => {
+    state.explanationLang = 'native';
+    const ex = state.activeSession?.exercises[state.activeExerciseIndex];
+    if (ex) renderHomeworkExplanation(ex);
+  });
+  $('btn-exp-target').addEventListener('click', () => {
+    const ex = state.activeSession?.exercises[state.activeExerciseIndex];
+    if (!ex?.explanationTarget) return;
+    state.explanationLang = 'target';
+    renderHomeworkExplanation(ex);
+  });
+  $('btn-exp-listen').addEventListener('click', () => speakActiveExplanation(false));
+  $('btn-exp-slow').addEventListener('click', () => speakActiveExplanation(true));
   $('hw-reply-form').addEventListener('submit', submitHomeworkReply);
   $('btn-hw-complete').addEventListener('click', completeActiveExercise);
 

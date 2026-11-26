@@ -252,6 +252,10 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
 
   const profile = await getActiveProfile(c.env.DB, profileId);
   const languageCode = parsed.data.languageCode || profile.targetLanguageCode;
+  const spokenLanguageName =
+    languageCode.toLowerCase() === profile.nativeLanguageCode.toLowerCase()
+      ? profile.nativeLanguageName
+      : profile.targetLanguageName;
   const geminiVoice = resolveGeminiVoiceName(profile.ttsVoiceName, c.env.GEMINI_TTS_VOICE);
   const cacheKey = await computeAudioCacheKey([
     c.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts",
@@ -282,7 +286,7 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
   let audio = await synthesizeWithGeminiTts(c.env, {
     text: parsed.data.text,
     languageCode,
-    targetLanguageName: profile.targetLanguageName,
+    targetLanguageName: spokenLanguageName,
     voiceName: geminiVoice,
     slow: parsed.data.slow,
   });

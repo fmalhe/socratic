@@ -966,12 +966,80 @@ body {
   padding: 14px 16px;
   border-radius: var(--radius-md);
   background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-left: 2px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.explanation-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flag-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.flag-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.14s var(--ease), background 0.14s var(--ease), border-color 0.14s var(--ease), transform 0.1s var(--ease);
+}
+
+.flag-btn:hover {
+  opacity: 0.9;
+}
+
+.flag-btn:active {
+  transform: translateY(1px);
+}
+
+.flag-btn.is-active {
+  opacity: 1;
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  box-shadow: var(--sheen), var(--shadow-xs);
+}
+
+.flag-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.flag-emoji {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.explanation-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .explanation-row p {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 1.02rem;
   color: var(--ink);
   line-height: 1.55;
 }

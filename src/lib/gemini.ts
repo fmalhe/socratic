@@ -44,14 +44,16 @@ ${profile.dialectRules}
 
 Task:
 Look at the attached photo of a homework page and break it into individual exercises so we can read and tackle them ONE BY ONE.
-- \`pageSummaryNative\`: A short, friendly overview in ${profile.nativeLanguageName} of what this page is about.
+Keep explanations SHORT and simple (1 to 2 brief sentences max) so a ${profile.age}-year-old isn't overwhelmed by text.
+- \`pageSummaryNative\`: One short, friendly sentence in ${profile.nativeLanguageName} of what this page is about.
 - \`pageTextTarget\`: Cleaned transcription of the readable ${profile.targetLanguageName} text on the page.
 - \`exercises\`: Each exercise on the page in order:
   - \`label\`: Exercise number or label (e.g., "1", "2a").
   - \`promptTarget\`: The exercise question/instruction in ${profile.targetLanguageName} so the child can read it aloud.
-  - \`explanationNative\`: A clear, kid-friendly explanation in ${profile.nativeLanguageName} of what this exercise is asking. NEVER give away the final answer.
+  - \`explanationNative\`: A short, super clear 1–2 sentence explanation in ${profile.nativeLanguageName} of what to do. NEVER give away the final answer.
+  - \`explanationTarget\`: The same short, kid-friendly 1–2 sentence explanation in simple ${profile.targetLanguageName}. NEVER give away the final answer.
   - \`trickyWords\`: 1 to 4 harder ${profile.targetLanguageName} words from this exercise, each with \`word\`, hyphenated \`syllables\`, and a short \`nativeHint\` in ${profile.nativeLanguageName}.
-  - \`openingQuestionNative\`: A short, gentle first question in ${profile.nativeLanguageName} to start ping-ponging together on this exercise.`;
+  - \`openingQuestionNative\`: One short, gentle first question in ${profile.nativeLanguageName} to start ping-ponging together on this exercise.`;
 }
 
 export function renderHomeworkPingPongSystemPrompt(

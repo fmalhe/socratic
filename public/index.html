@@ -290,7 +290,25 @@
             <div class="tricky-words-row" id="hw-ex-words"></div>
 
             <div class="explanation-row">
-              <div class="eyebrow">Explanation</div>
+              <div class="explanation-bar">
+                <div class="flag-toggle" role="group" aria-label="Explanation language">
+                  <button class="flag-btn is-active" id="btn-exp-native" type="button" aria-pressed="true" title="Native language explanation">
+                    <span class="flag-emoji" id="flag-exp-native">🇳🇴</span>
+                  </button>
+                  <button class="flag-btn" id="btn-exp-target" type="button" aria-pressed="false" title="Target language explanation">
+                    <span class="flag-emoji" id="flag-exp-target">🇵🇹</span>
+                  </button>
+                </div>
+                <div class="explanation-audio">
+                  <button class="btn btn-secondary btn-sm" id="btn-exp-listen" type="button" aria-label="Listen to explanation">
+                    <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                    </svg>
+                    <span>Listen</span>
+                  </button>
+                  <button class="btn btn-ghost btn-sm" id="btn-exp-slow" type="button" aria-label="Listen slowly">0.75×</button>
+                </div>
+              </div>
               <p id="hw-ex-explanation"></p>
             </div>
 
