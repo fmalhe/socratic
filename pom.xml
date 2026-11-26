@@ -290,6 +290,7 @@
                     </activeStyles>
                     <exclusions>
                         <exclusion>target/generated-sources/**</exclusion>
+                        <exclusion>cloudflare/**</exclusion>
                     </exclusions>
                 </configuration>
                 <dependencies>

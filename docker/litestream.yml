@@ -1,0 +1,11 @@
+dbs:
+  - path: /app/data/tutor.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_R2_BUCKET}
+        path: tutor.db
+        endpoint: ${LITESTREAM_R2_ENDPOINT}
+        region: auto
+        force-path-style: true
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}

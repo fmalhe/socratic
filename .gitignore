@@ -28,3 +28,7 @@ out/
 
 ### Local SQLite DB ###
 data/
+
+### Cloudflare Worker ###
+cloudflare/node_modules/
+cloudflare/.wrangler/
