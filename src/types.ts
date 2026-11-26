@@ -64,6 +64,7 @@ export interface HomeworkExerciseDto {
   position: number;
   label: string;
   promptTarget: string;
+  promptNative?: string | null;
   explanationNative: string;
   explanationTarget?: string | null;
   explanationEnglish?: string | null;

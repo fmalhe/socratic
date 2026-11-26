@@ -36,6 +36,7 @@ interface ExerciseRow {
   position: number;
   label: string;
   prompt_target: string;
+  prompt_native: string | null;
   explanation_native: string;
   explanation_target: string | null;
   explanation_english: string | null;
@@ -59,6 +60,7 @@ interface ScannedHomeworkPage {
   exercises: Array<{
     label: string;
     promptTarget: string;
+    promptNative: string;
     explanationNative: string;
     explanationTarget: string;
     explanationEnglish: string;
@@ -95,6 +97,7 @@ const HOMEWORK_SCAN_SCHEMA = {
         properties: {
           label: { type: "STRING" },
           promptTarget: { type: "STRING" },
+          promptNative: { type: "STRING" },
           explanationNative: { type: "STRING" },
           explanationTarget: { type: "STRING" },
           explanationEnglish: { type: "STRING" },
@@ -115,6 +118,7 @@ const HOMEWORK_SCAN_SCHEMA = {
         required: [
           "label",
           "promptTarget",
+          "promptNative",
           "explanationNative",
           "explanationTarget",
           "explanationEnglish",
@@ -168,6 +172,7 @@ async function loadExercises(db: D1Database, sessionId: number): Promise<Homewor
       position: row.position,
       label: row.label,
       promptTarget: row.prompt_target,
+      promptNative: row.prompt_native ?? null,
       explanationNative: row.explanation_native,
       explanationTarget: row.explanation_target ?? null,
       explanationEnglish: row.explanation_english ?? null,
@@ -284,13 +289,14 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
   const exerciseStatements = scanned.exercises.map((ex, idx) =>
     c.env.DB.prepare(
       `INSERT INTO homework_exercise
-         (session_id, position, label, prompt_target, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
+         (session_id, position, label, prompt_target, prompt_native, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
     ).bind(
       sessionId,
       idx + 1,
       ex.label,
       ex.promptTarget,
+      ex.promptNative ?? null,
       ex.explanationNative,
       ex.explanationTarget ?? null,
       ex.explanationEnglish ?? null,
@@ -467,6 +473,62 @@ homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/complete", async
 
   await c.env.DB.prepare("UPDATE homework_exercise SET status = 'COMPLETED' WHERE id = ?")
     .bind(exerciseId)
+    .run();
+
+  const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const updatedExercise = updatedSession?.exercises.find((e) => e.id === exerciseId);
+  return c.json(updatedExercise);
+});
+
+const HYDRATE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    promptNative: { type: "STRING" },
+    explanationTarget: { type: "STRING" },
+    explanationEnglish: { type: "STRING" },
+  },
+  required: ["promptNative", "explanationTarget", "explanationEnglish"],
+};
+
+homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/hydrate", async (c) => {
+  const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
+  const sessionId = Number(c.req.param("sessionId"));
+  const exerciseId = Number(c.req.param("exerciseId"));
+
+  const profile = await getActiveProfile(c.env.DB, profileId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const exercise = session?.exercises.find((e) => e.id === exerciseId);
+  if (!session || !exercise) {
+    return c.json({ error: `Homework exercise not found: ${exerciseId}` }, 404);
+  }
+
+  if (exercise.promptNative && exercise.explanationTarget && exercise.explanationEnglish) {
+    return c.json(exercise);
+  }
+
+  const hydrated = await callGeminiStructured<{
+    promptNative: string;
+    explanationTarget: string;
+    explanationEnglish: string;
+  }>(c.env, {
+    systemPrompt: `You are a warm, Socratic homework tutor for a ${profile.age}-year-old learning ${profile.targetLanguageName} (native: ${profile.nativeLanguageName}).
+${profile.dialectRules}
+Return concise, kid-friendly spoken text (1-2 short sentences max). NEVER give away the answer.
+- promptNative: natural ${profile.nativeLanguageName} translation of the exercise question.
+- explanationTarget: short spoken explanation in simple ${profile.targetLanguageName}.
+- explanationEnglish: short spoken explanation in simple English.`,
+    userText: `Exercise question (${profile.targetLanguageName}): ${exercise.promptTarget}\nExisting explanation (${profile.nativeLanguageName}): ${exercise.explanationNative}`,
+    responseSchema: HYDRATE_SCHEMA,
+  });
+
+  await c.env.DB.prepare(
+    `UPDATE homework_exercise
+       SET prompt_native = COALESCE(prompt_native, ?),
+           explanation_target = COALESCE(explanation_target, ?),
+           explanation_english = COALESCE(explanation_english, ?)
+     WHERE id = ?`,
+  )
+    .bind(hydrated.promptNative, hydrated.explanationTarget, hydrated.explanationEnglish, exerciseId)
     .run();
 
   const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId);

@@ -387,10 +387,10 @@ async function loadProfile() {
   state.profile = await apiJson('/api/profile');
   const p = state.profile;
   $('learner-subtitle').textContent = `${p.name} · ${flagForLanguage(p.targetLanguageCode)} → ${flagForLanguage(p.nativeLanguageCode)}`;
+  $('flag-q-target').textContent = flagForLanguage(p.targetLanguageCode);
+  $('flag-q-native').textContent = flagForLanguage(p.nativeLanguageCode);
   $('flag-exp-native').textContent = flagForLanguage(p.nativeLanguageCode);
   $('flag-exp-target').textContent = flagForLanguage(p.targetLanguageCode);
-  $('btn-exp-native').title = p.nativeLanguageName;
-  $('btn-exp-target').title = p.targetLanguageName;
   $('prof-name').value = p.name;
   $('prof-age').value = p.age;
   $('prof-target-code').value = p.targetLanguageCode;
@@ -1023,11 +1023,15 @@ async function queryHomeworkSessions(q) {
 function renderSessionChips() {
   const container = $('homework-recent-sessions');
   const chips = $('session-chips');
+  const searchInput = $('hw-search-input');
   if (!state.homeworkSessions.length && !hwSearchQuery) {
     container.hidden = true;
     return;
   }
   container.hidden = false;
+  if (searchInput) {
+    searchInput.hidden = state.homeworkSessions.length < 4 && !hwSearchQuery;
+  }
   chips.innerHTML = '';
   if (!state.homeworkSessions.length && hwSearchQuery) {
     chips.innerHTML = '<span class="muted-note">No matching pages found.</span>';
@@ -1064,7 +1068,7 @@ async function handleHomeworkScan(file) {
         homeworkProgress.startAnalyzing([
           'Reading worksheet text…',
           'Splitting into individual exercises…',
-          'Preparing Socratic hints & tricky words…',
+          'Preparing spoken hints & tricky words…',
         ]);
       }
     });
@@ -1076,7 +1080,7 @@ async function handleHomeworkScan(file) {
     homeworkProgress.finish();
     state.homeworkSessions = [session, ...state.homeworkSessions.filter((s) => s.id !== session.id)];
     selectHomeworkSession(session);
-    showToast(`Found ${session.exercises.length} exercises! Let's do them one by one.`);
+    showToast(`Found ${session.exercises.length} exercises!`);
   } catch (err) {
     URL.revokeObjectURL(localUrl);
     homeworkProgress.hide();
@@ -1093,40 +1097,82 @@ function selectHomeworkSession(session) {
   renderHomeworkWorkspace();
 }
 
-function renderHomeworkExplanation(ex) {
-  const nativeBtn = $('btn-exp-native');
-  const englishBtn = $('btn-exp-english');
-  const targetBtn = $('btn-exp-target');
+async function ensureExerciseHydrated(session, ex) {
+  if (ex.promptNative && ex.explanationTarget && ex.explanationEnglish) {
+    return ex;
+  }
+  const updated = await apiJson(
+    `/api/homework/sessions/${session.id}/exercises/${ex.id}/hydrate`,
+    { method: 'POST' },
+  );
+  if (updated) {
+    session.exercises = session.exercises.map((item) => (item.id === updated.id ? updated : item));
+    return updated;
+  }
+  return ex;
+}
 
-  nativeBtn.hidden = !ex?.explanationNative;
-  englishBtn.hidden = !ex?.explanationEnglish;
-  targetBtn.hidden = !ex?.explanationTarget;
-  [nativeBtn, englishBtn, targetBtn].forEach((b) => b.classList.remove('is-playing'));
+function renderHomeworkExplanation() {
+  ['btn-exp-native', 'btn-exp-target', 'btn-exp-english'].forEach((id) => {
+    const btn = $(id);
+    if (btn) {
+      btn.hidden = false;
+      btn.classList.remove('is-playing');
+    }
+  });
+}
+
+async function speakHomeworkPromptNative(btnEl) {
+  const session = state.activeSession;
+  let ex = session?.exercises[state.activeExerciseIndex];
+  if (!session || !ex) return;
+
+  btnEl?.classList.add('is-playing');
+  try {
+    if (!ex.promptNative) {
+      ex = await ensureExerciseHydrated(session, ex);
+    }
+    if (ex.promptNative) {
+      await speakText(ex.promptNative, false, state.profile?.nativeLanguageCode || 'nb-NO');
+    }
+  } catch (err) {
+    showToast(`Could not load audio: ${err.message}`);
+  } finally {
+    setTimeout(() => btnEl?.classList.remove('is-playing'), 900);
+  }
 }
 
 async function speakHomeworkHint(kind, btnEl) {
-  const ex = state.activeSession?.exercises[state.activeExerciseIndex];
-  if (!ex) return;
-  let text = '';
-  let langCode = 'nb-NO';
-  if (kind === 'native') {
-    text = ex.explanationNative;
-    langCode = state.profile?.nativeLanguageCode || 'nb-NO';
-  } else if (kind === 'english') {
-    text = ex.explanationEnglish;
-    langCode = 'en-GB';
-  } else if (kind === 'target') {
-    text = ex.explanationTarget;
-    langCode = state.profile?.targetLanguageCode || 'pt-PT';
-  }
-  if (!text) return;
+  const session = state.activeSession;
+  let ex = session?.exercises[state.activeExerciseIndex];
+  if (!session || !ex) return;
 
   document.querySelectorAll('.hint-flag-btn').forEach((b) => b.classList.remove('is-playing'));
   btnEl?.classList.add('is-playing');
+
   try {
-    await speakText(text, false, langCode);
+    if ((kind === 'target' && !ex.explanationTarget) || (kind === 'english' && !ex.explanationEnglish)) {
+      ex = await ensureExerciseHydrated(session, ex);
+    }
+    let text = '';
+    let langCode = 'nb-NO';
+    if (kind === 'native') {
+      text = ex.explanationNative;
+      langCode = state.profile?.nativeLanguageCode || 'nb-NO';
+    } else if (kind === 'target') {
+      text = ex.explanationTarget;
+      langCode = state.profile?.targetLanguageCode || 'pt-PT';
+    } else if (kind === 'english') {
+      text = ex.explanationEnglish;
+      langCode = 'en-GB';
+    }
+    if (text) {
+      await speakText(text, false, langCode);
+    }
+  } catch (err) {
+    showToast(`Could not load audio: ${err.message}`);
   } finally {
-    setTimeout(() => btnEl?.classList.remove('is-playing'), 1200);
+    setTimeout(() => btnEl?.classList.remove('is-playing'), 900);
   }
 }
 
@@ -1169,7 +1215,7 @@ function renderHomeworkWorkspace() {
   statusEl.textContent = ex.status;
   statusEl.classList.toggle('is-completed', ex.status === 'COMPLETED');
   $('hw-ex-target').textContent = ex.promptTarget;
-  renderHomeworkExplanation(ex);
+  renderHomeworkExplanation();
 
   const wordsRow = $('hw-ex-words');
   wordsRow.innerHTML = '';
@@ -1182,33 +1228,9 @@ function renderHomeworkWorkspace() {
     wordsRow.appendChild(pill);
   });
 
-  const msgBox = $('hw-messages');
-  msgBox.innerHTML = '';
-  const opener = document.createElement('div');
-  opener.className = 'msg-bubble msg-tutor';
-  opener.textContent = ex.openingQuestionNative;
-  msgBox.appendChild(opener);
-
-  (ex.messages || []).forEach((m) => {
-    const bubble = document.createElement('div');
-    bubble.className = `msg-bubble ${m.sender === 'CHILD' ? 'msg-child' : 'msg-tutor'}`;
-    bubble.textContent = m.content;
-    if (m.targetPhrase) {
-      const phraseBtn = document.createElement('button');
-      phraseBtn.type = 'button';
-      phraseBtn.className = 'msg-phrase-btn';
-      phraseBtn.textContent = m.targetPhrase;
-      phraseBtn.addEventListener('click', () => speakText(m.targetPhrase, true));
-      bubble.appendChild(document.createElement('br'));
-      bubble.appendChild(phraseBtn);
-    }
-    msgBox.appendChild(bubble);
-  });
-  msgBox.scrollTop = msgBox.scrollHeight;
-
   const completeBtn = $('btn-hw-complete');
   completeBtn.disabled = ex.status === 'COMPLETED';
-  completeBtn.textContent = ex.status === 'COMPLETED' ? 'Completed' : 'Mark Exercise Done';
+  completeBtn.textContent = ex.status === 'COMPLETED' ? 'Done ✓' : 'Done ✓';
 }
 
 async function submitHomeworkReply(event) {
@@ -1359,10 +1381,10 @@ function init() {
     const ex = state.activeSession?.exercises[state.activeExerciseIndex];
     speakText(ex?.promptTarget, true, state.profile?.targetLanguageCode);
   });
+  $('btn-hw-listen-native').addEventListener('click', (e) => speakHomeworkPromptNative(e.currentTarget));
   $('btn-exp-native').addEventListener('click', (e) => speakHomeworkHint('native', e.currentTarget));
-  $('btn-exp-english').addEventListener('click', (e) => speakHomeworkHint('english', e.currentTarget));
   $('btn-exp-target').addEventListener('click', (e) => speakHomeworkHint('target', e.currentTarget));
-  $('hw-reply-form').addEventListener('submit', submitHomeworkReply);
+  $('btn-exp-english').addEventListener('click', (e) => speakHomeworkHint('english', e.currentTarget));
   $('btn-hw-complete').addEventListener('click', completeActiveExercise);
 
   $('profile-form').addEventListener('submit', saveProfile);
