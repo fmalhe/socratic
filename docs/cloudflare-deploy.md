@@ -61,3 +61,21 @@ Because `workers_dev` is `false`, all traffic goes through `https://socratic.you
 ## 5. Install on iPad Safari
 1. On your iPad (connected to home Wi-Fi), open `https://socratic.yourdomain.com` in **Safari**.
 2. Tap **Share → Add to Home Screen** for a full-screen iPad app with camera capture and audio playback.
+
+---
+
+## 6. Automated Deploys via GitHub Actions
+
+This repo includes [`.github/workflows/deploy-cloudflare.yml`](../.github/workflows/deploy-cloudflare.yml) (plus [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) on every push/PR).
+
+To enable automated deploys from GitHub:
+1. In **GitHub → Settings → Secrets and variables → Actions → Secrets**, add:
+   - `CLOUDFLARE_API_TOKEN` (Cloudflare API token with **Workers Scripts: Edit**, **Containers: Edit**, and **Account Settings: Read**)
+   - `CLOUDFLARE_ACCOUNT_ID`
+2. Configure the runtime Worker secrets once (either via Cloudflare Dashboard → Workers → `socratic` → Settings → Variables & Secrets, or via `npx wrangler secret put`):
+   - `GEMINI_API_KEY`
+   - `LITESTREAM_R2_BUCKET`
+   - `LITESTREAM_R2_ENDPOINT`
+   - `LITESTREAM_ACCESS_KEY_ID`
+   - `LITESTREAM_SECRET_ACCESS_KEY`
+3. Trigger manually from **GitHub → Actions → Deploy to Cloudflare → Run workflow**, or add Actions **Variable** `CLOUDFLARE_DEPLOY_ENABLED=true` to auto-deploy on every push to `main`.
