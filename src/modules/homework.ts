@@ -19,12 +19,14 @@ import type {
   WordHint,
 } from "../types";
 import { getActiveProfile, resolveProfileId } from "./profile";
+import { buildUploadUrl, storeUploadedImage } from "./uploads";
 
 interface SessionRow {
   id: number;
   profile_id: number;
   page_summary_native: string;
   page_text_target: string;
+  image_key: string | null;
   created_at: string;
 }
 
@@ -179,6 +181,7 @@ export async function getHomeworkSession(
     profileId: row.profile_id,
     pageSummaryNative: row.page_summary_native,
     pageTextTarget: row.page_text_target,
+    imageUrl: buildUploadUrl(row.image_key),
     createdAt: row.created_at,
     exercises: await loadExercises(db, row.id),
   };
@@ -200,6 +203,7 @@ export async function listHomeworkSessions(
       profileId: row.profile_id,
       pageSummaryNative: row.page_summary_native,
       pageTextTarget: row.page_text_target,
+      imageUrl: buildUploadUrl(row.image_key),
       createdAt: row.created_at,
       exercises: await loadExercises(db, row.id),
     });
@@ -242,17 +246,22 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
+  const [inlineImage, stored] = await Promise.all([
+    fileToInlineImage(image),
+    storeUploadedImage(c.env, image, "homework"),
+  ]);
+
   const scanned = await callGeminiStructured<ScannedHomeworkPage>(c.env, {
     systemPrompt: renderHomeworkScanSystemPrompt(profile),
     userText: "Please scan this homework page and break down each exercise.",
-    image: await fileToInlineImage(image),
+    image: inlineImage,
     responseSchema: HOMEWORK_SCAN_SCHEMA,
   });
 
   const insertSession = await c.env.DB.prepare(
-    "INSERT INTO homework_session (profile_id, page_summary_native, page_text_target) VALUES (?, ?, ?)",
+    "INSERT INTO homework_session (profile_id, page_summary_native, page_text_target, image_key) VALUES (?, ?, ?, ?)",
   )
-    .bind(profile.id, scanned.pageSummaryNative, scanned.pageTextTarget)
+    .bind(profile.id, scanned.pageSummaryNative, scanned.pageTextTarget, stored.imageKey)
     .run();
 
   const sessionId = Number(insertSession.meta.last_row_id);

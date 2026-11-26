@@ -6,6 +6,7 @@ import { mcpRoutes } from "./modules/mcp";
 import { profileRoutes } from "./modules/profile";
 import { progressRoutes } from "./modules/progress";
 import { readingRoutes } from "./modules/reading";
+import { uploadRoutes } from "./modules/uploads";
 import type { Env } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -26,13 +27,14 @@ app.use("*", async (c, next) => {
 
 app.use("/api/*", cors());
 
-app.get("/api/health", (c) => c.json({ status: "UP" }));
+app.get("/api/health", (c) => c.json({ status: "UP", r2Enabled: Boolean(c.env.UPLOADS) }));
 
 app.route("/api/profile", profileRoutes);
 app.route("/api/reading", readingRoutes);
 app.route("/api/homework", homeworkRoutes);
 app.route("/api/audio", audioRoutes);
 app.route("/api/progress", progressRoutes);
+app.route("/api/uploads", uploadRoutes);
 app.route("/mcp", mcpRoutes);
 
 app.onError((err, c) => {

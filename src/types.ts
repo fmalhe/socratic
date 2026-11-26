@@ -1,6 +1,8 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  /** Optional Cloudflare R2 bucket for persisting scanned page photos. */
+  UPLOADS?: R2Bucket;
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
   GOOGLE_TTS_API_KEY?: string;
@@ -35,6 +37,7 @@ export interface SentenceItem {
 export interface ReadingPageResponse {
   fullText: string;
   sentences: SentenceItem[];
+  imageUrl?: string | null;
 }
 
 export interface HomeworkHelpResponse {
@@ -71,6 +74,7 @@ export interface HomeworkSessionResponse {
   profileId: number;
   pageSummaryNative: string;
   pageTextTarget: string;
+  imageUrl?: string | null;
   createdAt: string;
   exercises: HomeworkExerciseDto[];
 }

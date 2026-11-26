@@ -2,13 +2,39 @@ const state = {
   profile: null,
   progress: null,
   readingPage: null,
+  readingPreviewUrl: null,
   homeworkSessions: [],
   activeSession: null,
   activeExerciseIndex: 0,
   activeWord: null,
+  localSessionPhotos: new Map(),
 };
 
 const $ = (id) => document.getElementById(id);
+
+let cachedVoices = [];
+function refreshVoices() {
+  if (window.speechSynthesis && typeof window.speechSynthesis.getVoices === 'function') {
+    cachedVoices = window.speechSynthesis.getVoices() || [];
+  }
+}
+if (window.speechSynthesis) {
+  refreshVoices();
+  window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices);
+}
+
+function pickBestVoice(langCode) {
+  if (!cachedVoices.length) refreshVoices();
+  if (!cachedVoices.length || !langCode) return null;
+  const target = langCode.toLowerCase();
+  const base = target.split('-')[0];
+  return (
+    cachedVoices.find((v) => v.lang && v.lang.toLowerCase() === target) ||
+    cachedVoices.find((v) => v.lang && v.lang.toLowerCase().startsWith(`${base}-`)) ||
+    cachedVoices.find((v) => v.lang && v.lang.toLowerCase() === base) ||
+    null
+  );
+}
 
 let toastTimer = null;
 function showToast(message) {
@@ -18,7 +44,14 @@ function showToast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     el.hidden = true;
-  }, 3200);
+  }, 3600);
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function apiJson(url, options = {}) {
@@ -30,7 +63,199 @@ async function apiJson(url, options = {}) {
   return res.json();
 }
 
-/* Safari-friendly TTS with automatic speechSynthesis fallback on HTTP 501 */
+/* Client-side resize & JPEG compression (fast on Android Chrome/Brave & iPad Safari) */
+async function compressImageForUpload(file, maxDimension = 1600, quality = 0.82) {
+  if (!file || !file.type.startsWith('image/')) return file;
+  // Skip tiny images already under 350 KB
+  if (file.size <= 350 * 1024 && (file.type === 'image/jpeg' || file.type === 'image/webp')) {
+    return file;
+  }
+
+  let source = null;
+  let width = 0;
+  let height = 0;
+  let cleanup = () => {};
+
+  try {
+    if (typeof createImageBitmap === 'function') {
+      const bitmap = await createImageBitmap(file);
+      source = bitmap;
+      width = bitmap.width;
+      height = bitmap.height;
+      cleanup = () => bitmap.close?.();
+    } else {
+      const url = URL.createObjectURL(file);
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = url;
+      });
+      source = img;
+      width = img.naturalWidth || img.width;
+      height = img.naturalHeight || img.height;
+      cleanup = () => URL.revokeObjectURL(url);
+    }
+
+    const scale = Math.min(1, maxDimension / Math.max(width, height, 1));
+    const targetW = Math.max(1, Math.round(width * scale));
+    const targetH = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(source, 0, 0, targetW, targetH);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob || blob.size >= file.size) {
+      return file;
+    }
+    const baseName = (file.name || 'scan').replace(/\.[^.]+$/, '');
+    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
+  } catch {
+    return file;
+  } finally {
+    cleanup();
+  }
+}
+
+/* XMLHttpRequest wrapper to track real upload byte progress */
+function uploadFormWithProgress(url, formData, onUploadFraction) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+
+    xhr.upload.onprogress = (evt) => {
+      if (evt.lengthComputable && evt.total > 0) {
+        onUploadFraction(Math.min(1, evt.loaded / evt.total));
+      }
+    };
+    xhr.upload.onload = () => onUploadFraction(1);
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error('Invalid JSON response from server'));
+        }
+      } else {
+        let message = xhr.responseText || `Request failed (${xhr.status})`;
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (parsed?.error) message = typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
+        } catch {
+          // keep raw text
+        }
+        reject(new Error(message));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error while uploading image'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+    xhr.send(formData);
+  });
+}
+
+/* Multi-stage progress controller for Reading & Homework scans */
+function createScanProgress(prefix) {
+  const card = $(`${prefix}-loading`);
+  const thumb = $(`${prefix}-progress-thumb`);
+  const stageEl = $(`${prefix}-progress-stage`);
+  const pctEl = $(`${prefix}-progress-pct`);
+  const barEl = $(`${prefix}-progress-bar`);
+  const fillEl = $(`${prefix}-progress-fill`);
+  const stepsEl = $(`${prefix}-progress-steps`);
+  const sizeEl = $(`${prefix}-progress-size`);
+
+  let currentPct = 0;
+  let analyzeTimer = null;
+
+  function setPct(pct) {
+    currentPct = Math.max(currentPct, Math.min(100, Math.round(pct)));
+    pctEl.textContent = `${currentPct}%`;
+    fillEl.style.width = `${currentPct}%`;
+    barEl.setAttribute('aria-valuenow', String(currentPct));
+  }
+
+  function setStep(activeStep) {
+    const order = ['optimize', 'upload', 'analyze'];
+    const activeIdx = order.indexOf(activeStep);
+    stepsEl.querySelectorAll('.p-step').forEach((el) => {
+      const idx = order.indexOf(el.dataset.step);
+      el.classList.toggle('is-done', activeStep === 'done' || (activeIdx >= 0 && idx < activeIdx));
+      el.classList.toggle('is-active', activeStep !== 'done' && idx === activeIdx);
+    });
+  }
+
+  return {
+    start(previewUrl) {
+      clearInterval(analyzeTimer);
+      currentPct = 0;
+      sizeEl.textContent = '';
+      if (previewUrl) {
+        thumb.src = previewUrl;
+        thumb.hidden = false;
+      } else {
+        thumb.hidden = true;
+      }
+      stageEl.textContent = 'Optimizing photo…';
+      setStep('optimize');
+      setPct(8);
+      card.hidden = false;
+    },
+    setSizeInfo(originalBytes, optimizedBytes) {
+      if (originalBytes > optimizedBytes) {
+        sizeEl.textContent = `${formatBytes(originalBytes)} → ${formatBytes(optimizedBytes)}`;
+      } else {
+        sizeEl.textContent = formatBytes(optimizedBytes);
+      }
+    },
+    setUploadFraction(fraction) {
+      stageEl.textContent = fraction < 1 ? 'Uploading photo…' : 'Photo uploaded, starting analysis…';
+      setStep('upload');
+      setPct(15 + fraction * 30);
+    },
+    startAnalyzing(messages) {
+      clearInterval(analyzeTimer);
+      setStep('analyze');
+      setPct(48);
+      let tick = 0;
+      stageEl.textContent = messages[0];
+      analyzeTimer = setInterval(() => {
+        tick += 1;
+        // Asymptotically approach 94% while waiting for Gemini
+        const next = currentPct + Math.max(1, Math.round((94 - currentPct) * 0.16));
+        setPct(Math.min(94, next));
+        const msgIndex = Math.min(messages.length - 1, Math.floor(tick / 4));
+        stageEl.textContent = messages[msgIndex];
+      }, 650);
+    },
+    finish() {
+      clearInterval(analyzeTimer);
+      setStep('done');
+      stageEl.textContent = 'Ready!';
+      setPct(100);
+      setTimeout(() => {
+        card.hidden = true;
+      }, 280);
+    },
+    hide() {
+      clearInterval(analyzeTimer);
+      card.hidden = true;
+    },
+  };
+}
+
+function openPhotoDialog(url) {
+  if (!url) return;
+  $('photo-dialog-img').src = url;
+  $('photo-dialog').showModal();
+}
+
+/* Safari & Android Chrome/Brave friendly TTS with automatic speechSynthesis fallback on HTTP 501 */
 let currentAudio = null;
 async function speakText(text, slow = false) {
   if (!text) return;
@@ -67,8 +292,11 @@ async function speakText(text, slow = false) {
   }
 
   if (window.speechSynthesis) {
+    const langCode = state.profile?.targetLanguageCode || 'pt-PT';
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = state.profile?.targetLanguageCode || 'pt-PT';
+    utterance.lang = langCode;
+    const voice = pickBestVoice(langCode);
+    if (voice) utterance.voice = voice;
     utterance.rate = slow ? 0.72 : 0.96;
     window.speechSynthesis.speak(utterance);
   } else {
@@ -143,26 +371,54 @@ function openWordDialog(wordHint) {
   speakText(wordHint.word, true);
 }
 
+const readingProgress = createScanProgress('reading');
+const homeworkProgress = createScanProgress('homework');
+
 /* Reading Flow */
 async function handleReadingUpload(file) {
   if (!file) return;
-  $('reading-loading').hidden = false;
+  const localUrl = URL.createObjectURL(file);
+  if (state.readingPreviewUrl) {
+    URL.revokeObjectURL(state.readingPreviewUrl);
+  }
+  state.readingPreviewUrl = localUrl;
+
   $('reading-results').hidden = true;
+  readingProgress.start(localUrl);
   try {
+    const optimized = await compressImageForUpload(file);
+    readingProgress.setSizeInfo(file.size, optimized.size);
+
     const form = new FormData();
-    form.append('image', file);
-    state.readingPage = await apiJson('/api/reading/scan', { method: 'POST', body: form });
+    form.append('image', optimized);
+    let analyzingStarted = false;
+
+    state.readingPage = await uploadFormWithProgress('/api/reading/scan', form, (fraction) => {
+      readingProgress.setUploadFraction(fraction);
+      if (fraction >= 1 && !analyzingStarted) {
+        analyzingStarted = true;
+        readingProgress.startAnalyzing([
+          'Reading text on the page…',
+          'Breaking into kid-friendly sentences…',
+          'Finding tricky words & syllables…',
+        ]);
+      }
+    });
+    readingProgress.finish();
     renderReadingPage();
   } catch (err) {
+    readingProgress.hide();
     showToast(`Could not scan page: ${err.message}`);
-  } finally {
-    $('reading-loading').hidden = true;
   }
 }
 
 function renderReadingPage() {
   const page = state.readingPage;
   if (!page) return;
+  const photoUrl = page.imageUrl || state.readingPreviewUrl;
+  const photoBtn = $('btn-reading-photo');
+  photoBtn.hidden = !photoUrl;
+
   const list = $('reading-sentences');
   list.innerHTML = '';
 
@@ -266,18 +522,40 @@ function renderSessionChips() {
 
 async function handleHomeworkScan(file) {
   if (!file) return;
-  $('homework-loading').hidden = false;
+  const localUrl = URL.createObjectURL(file);
+  homeworkProgress.start(localUrl);
   try {
+    const optimized = await compressImageForUpload(file);
+    homeworkProgress.setSizeInfo(file.size, optimized.size);
+
     const form = new FormData();
-    form.append('image', file);
-    const session = await apiJson('/api/homework/sessions/scan', { method: 'POST', body: form });
+    form.append('image', optimized);
+    let analyzingStarted = false;
+
+    const session = await uploadFormWithProgress('/api/homework/sessions/scan', form, (fraction) => {
+      homeworkProgress.setUploadFraction(fraction);
+      if (fraction >= 1 && !analyzingStarted) {
+        analyzingStarted = true;
+        homeworkProgress.startAnalyzing([
+          'Reading worksheet text…',
+          'Splitting into individual exercises…',
+          'Preparing Socratic hints & tricky words…',
+        ]);
+      }
+    });
+    if (!session.imageUrl) {
+      state.localSessionPhotos.set(session.id, localUrl);
+    } else {
+      URL.revokeObjectURL(localUrl);
+    }
+    homeworkProgress.finish();
     state.homeworkSessions = [session, ...state.homeworkSessions.filter((s) => s.id !== session.id)];
     selectHomeworkSession(session);
     showToast(`Found ${session.exercises.length} exercises! Let's do them one by one.`);
   } catch (err) {
+    URL.revokeObjectURL(localUrl);
+    homeworkProgress.hide();
     showToast(`Could not scan homework: ${err.message}`);
-  } finally {
-    $('homework-loading').hidden = true;
   }
 }
 
@@ -297,6 +575,15 @@ function renderHomeworkWorkspace() {
   }
   $('homework-workspace').hidden = false;
   $('hw-page-summary').textContent = session.pageSummaryNative;
+
+  const photoUrl = session.imageUrl || state.localSessionPhotos.get(session.id) || null;
+  const photoBtn = $('btn-hw-photo');
+  if (photoUrl) {
+    $('hw-photo-thumb').src = photoUrl;
+    photoBtn.hidden = false;
+  } else {
+    photoBtn.hidden = true;
+  }
 
   const stepper = $('hw-exercise-stepper');
   stepper.innerHTML = '';
@@ -471,13 +758,27 @@ function init() {
     btn.addEventListener('click', () => switchTab(btn.dataset.nav));
   });
 
-  $('reading-camera-input').addEventListener('change', (e) => handleReadingUpload(e.target.files[0]));
-  $('reading-library-input').addEventListener('change', (e) => handleReadingUpload(e.target.files[0]));
+  const onFileSelected = (handler) => (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) handler(file);
+  };
+
+  $('reading-camera-input').addEventListener('change', onFileSelected(handleReadingUpload));
+  $('reading-library-input').addEventListener('change', onFileSelected(handleReadingUpload));
+  $('btn-reading-photo').addEventListener('click', () => {
+    openPhotoDialog(state.readingPage?.imageUrl || state.readingPreviewUrl);
+  });
   $('btn-read-all').addEventListener('click', () => speakText(state.readingPage?.fullText, false));
   $('btn-finish-reading').addEventListener('click', finishReadingPage);
 
-  $('homework-camera-input').addEventListener('change', (e) => handleHomeworkScan(e.target.files[0]));
-  $('homework-library-input').addEventListener('change', (e) => handleHomeworkScan(e.target.files[0]));
+  $('homework-camera-input').addEventListener('change', onFileSelected(handleHomeworkScan));
+  $('homework-library-input').addEventListener('change', onFileSelected(handleHomeworkScan));
+  $('btn-hw-photo').addEventListener('click', () => {
+    const session = state.activeSession;
+    const url = session?.imageUrl || (session ? state.localSessionPhotos.get(session.id) : null);
+    openPhotoDialog(url);
+  });
   $('btn-hw-listen').addEventListener('click', () => {
     const ex = state.activeSession?.exercises[state.activeExerciseIndex];
     speakText(ex?.promptTarget, false);
@@ -494,6 +795,11 @@ function init() {
   $('btn-dialog-slow').addEventListener('click', () => speakText(state.activeWord?.word, true));
   $('btn-dialog-normal').addEventListener('click', () => speakText(state.activeWord?.word, false));
   $('btn-dialog-close').addEventListener('click', () => $('word-dialog').close());
+
+  $('btn-photo-close').addEventListener('click', () => $('photo-dialog').close());
+  $('photo-dialog').addEventListener('click', (e) => {
+    if (e.target === $('photo-dialog')) $('photo-dialog').close();
+  });
 
   Promise.all([loadProfile(), loadProgress()]).catch((err) => {
     showToast(`Unable to connect to Socratic backend: ${err.message}`);

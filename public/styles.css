@@ -799,6 +799,8 @@ body {
   bottom: max(24px, env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  text-align: center;
   padding: 10px 18px;
   border-radius: var(--radius-pill);
   background: rgba(17, 24, 39, 0.92);
@@ -809,6 +811,203 @@ body {
   font-size: 0.88rem;
   box-shadow: var(--shadow-lg);
   z-index: 100;
+}
+
+/* Upload & Processing Progress Card */
+.progress-card {
+  padding: 18px 20px;
+  margin-bottom: 24px;
+}
+
+.progress-card-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.progress-thumb {
+  width: 60px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  flex-shrink: 0;
+}
+
+.progress-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-header-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-stage {
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.progress-pct {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--accent), #3B9EFF);
+  transition: width 0.25s var(--ease);
+}
+
+.progress-subrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.progress-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.p-step {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--ink-muted);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  border: 1px solid transparent;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+
+.p-step.is-active {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: rgba(0, 113, 227, 0.2);
+}
+
+.p-step.is-done {
+  color: var(--success);
+  background: var(--success-tint);
+}
+
+.progress-size {
+  font-size: 0.76rem;
+}
+
+/* Homework Overview Photo Thumbnail */
+.overview-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.overview-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.photo-thumb-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--ink-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+
+.photo-thumb-btn:active {
+  transform: scale(0.97);
+}
+
+.photo-thumb-btn img {
+  width: 56px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+/* Scanned Page Lightbox Dialog */
+.photo-dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  max-width: min(92vw, 760px);
+  max-height: 90dvh;
+  width: 100%;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.photo-dialog::backdrop {
+  background: rgba(17, 24, 39, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.photo-dialog-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.photo-dialog-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.photo-dialog-frame {
+  overflow: auto;
+  max-height: calc(90dvh - 80px);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  text-align: center;
+}
+
+.photo-dialog-frame img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  border-radius: var(--radius-sm);
 }
 
 .sr-only {
@@ -829,5 +1028,29 @@ body {
   }
   .reading-text {
     font-size: 1.24rem;
+  }
+  .capture-surface {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 520px) {
+  .capture-actions {
+    width: 100%;
+  }
+  .capture-actions .btn {
+    flex: 1 1 140px;
+    min-height: 46px;
+  }
+  .overview-top {
+    flex-direction: column;
+  }
+  .photo-thumb-btn {
+    flex-direction: row;
+    padding: 6px 12px 6px 6px;
+  }
+  .photo-thumb-btn img {
+    width: 40px;
+    height: 40px;
   }
 }

@@ -120,4 +120,37 @@ describe("Worker HTTP routes", () => {
       "getHomeworkSession",
     ]);
   });
+
+  it("handles /api/uploads gracefully when R2 is not configured and serves stored images when bound", async () => {
+    const unconfigured = await app.request("/api/uploads/homework/test.jpg", {}, makeEnv());
+    expect(unconfigured.status).toBe(404);
+
+    const store = new Map<string, { data: ArrayBuffer; contentType: string }>();
+    const mockR2 = {
+      put: async (key: string, value: ArrayBuffer, opts?: { httpMetadata?: { contentType?: string } }) => {
+        store.set(key, { data: value, contentType: opts?.httpMetadata?.contentType ?? "image/jpeg" });
+        return null;
+      },
+      get: async (key: string) => {
+        const entry = store.get(key);
+        if (!entry) return null;
+        return {
+          body: new Uint8Array(entry.data),
+          httpEtag: '"test-etag"',
+          writeHttpMetadata: (headers: Headers) => headers.set("Content-Type", entry.contentType),
+        };
+      },
+    } as unknown as R2Bucket;
+
+    const env = makeEnv({ UPLOADS: mockR2 });
+    const badPath = await app.request("/api/uploads/other/test.jpg", {}, env);
+    expect(badPath.status).toBe(400);
+
+    await mockR2.put("homework/page-1.jpg", new Uint8Array([1, 2, 3]).buffer, {
+      httpMetadata: { contentType: "image/jpeg" },
+    });
+    const okRes = await app.request("/api/uploads/homework/page-1.jpg", {}, env);
+    expect(okRes.status).toBe(200);
+    expect(okRes.headers.get("Content-Type")).toBe("image/jpeg");
+  });
 });

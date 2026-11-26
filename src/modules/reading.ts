@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { callGeminiStructured, fileToInlineImage, renderReadingSystemPrompt } from "../lib/gemini";
 import type { Env, ReadingPageResponse } from "../types";
 import { getActiveProfile, resolveProfileId } from "./profile";
+import { storeUploadedImage } from "./uploads";
 
 const READING_SCHEMA = {
   type: "OBJECT",
@@ -45,7 +46,10 @@ readingRoutes.post("/scan", async (c) => {
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const inlineImage = await fileToInlineImage(image);
+  const [inlineImage, stored] = await Promise.all([
+    fileToInlineImage(image),
+    storeUploadedImage(c.env, image, "reading"),
+  ]);
 
   const response = await callGeminiStructured<ReadingPageResponse>(c.env, {
     systemPrompt: renderReadingSystemPrompt(profile),
@@ -54,5 +58,8 @@ readingRoutes.post("/scan", async (c) => {
     responseSchema: READING_SCHEMA,
   });
 
-  return c.json(response);
+  return c.json({
+    ...response,
+    imageUrl: stored.imageUrl,
+  });
 });

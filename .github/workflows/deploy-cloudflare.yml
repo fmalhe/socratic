@@ -28,9 +28,10 @@ jobs:
           npm run typecheck
           npm test
 
-      - name: Inject D1 database ID from GitHub Secret
+      - name: Inject D1 database ID (and optional R2 bucket) from GitHub config
         env:
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME || vars.R2_BUCKET_NAME }}
         run: |
           if [ -z "$D1_DATABASE_ID" ]; then
             echo "Error: D1_DATABASE_ID secret is not set" >&2
@@ -38,9 +39,20 @@ jobs:
           fi
           node -e '
             const fs = require("fs");
-            const content = fs.readFileSync("wrangler.jsonc", "utf8");
-            const updated = content.replace("REPLACE_WITH_YOUR_D1_DATABASE_ID", process.env.D1_DATABASE_ID);
-            fs.writeFileSync("wrangler.jsonc", updated);
+            const raw = fs.readFileSync("wrangler.jsonc", "utf8");
+            const cfg = JSON.parse(raw.replace("REPLACE_WITH_YOUR_D1_DATABASE_ID", process.env.D1_DATABASE_ID));
+            if (process.env.R2_BUCKET_NAME) {
+              cfg.r2_buckets = [
+                {
+                  binding: "UPLOADS",
+                  bucket_name: process.env.R2_BUCKET_NAME.trim(),
+                },
+              ];
+              console.log("Bound R2 bucket:", process.env.R2_BUCKET_NAME.trim());
+            } else {
+              console.log("R2_BUCKET_NAME not set — deploying without R2 photo persistence.");
+            }
+            fs.writeFileSync("wrangler.jsonc", JSON.stringify(cfg, null, 2) + "\n");
           '
 
       - name: Apply D1 migrations

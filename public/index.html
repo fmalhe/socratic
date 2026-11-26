@@ -3,12 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="Socratic — Calm, focused multilingual reading and homework tutor for iPad.">
+  <meta name="description" content="Socratic — Calm, focused multilingual reading and homework tutor for iPad and Android.">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Socratic">
   <meta name="theme-color" content="#F5F5F7">
   <title>Socratic</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -104,15 +106,34 @@
           </div>
         </div>
 
-        <div class="loading-banner" id="reading-loading" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span>Analyzing page…</span>
+        <div class="progress-card surface" id="reading-loading" hidden>
+          <div class="progress-card-top">
+            <img class="progress-thumb" id="reading-progress-thumb" alt="Page preview" hidden>
+            <div class="progress-meta">
+              <div class="progress-header-row">
+                <span class="progress-stage" id="reading-progress-stage">Preparing photo…</span>
+                <span class="progress-pct num" id="reading-progress-pct">0%</span>
+              </div>
+              <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="reading-progress-bar">
+                <div class="progress-fill" id="reading-progress-fill"></div>
+              </div>
+              <div class="progress-subrow">
+                <span class="progress-steps" id="reading-progress-steps">
+                  <span class="p-step" data-step="optimize">1. Optimize</span>
+                  <span class="p-step" data-step="upload">2. Upload</span>
+                  <span class="p-step" data-step="analyze">3. Analyze</span>
+                </span>
+                <span class="progress-size muted-note" id="reading-progress-size"></span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="reading-results" hidden>
           <div class="section-bar">
             <h3>Sentences</h3>
             <div class="section-actions">
+              <button class="btn btn-secondary btn-sm" id="btn-reading-photo" type="button" hidden>View Photo</button>
               <button class="btn btn-secondary btn-sm" id="btn-read-all" type="button">Read Full Page</button>
               <button class="btn btn-success btn-sm" id="btn-finish-reading" type="button">Finish Page · +10</button>
             </div>
@@ -147,9 +168,27 @@
           </div>
         </div>
 
-        <div class="loading-banner" id="homework-loading" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span>Extracting exercises…</span>
+        <div class="progress-card surface" id="homework-loading" hidden>
+          <div class="progress-card-top">
+            <img class="progress-thumb" id="homework-progress-thumb" alt="Worksheet preview" hidden>
+            <div class="progress-meta">
+              <div class="progress-header-row">
+                <span class="progress-stage" id="homework-progress-stage">Preparing photo…</span>
+                <span class="progress-pct num" id="homework-progress-pct">0%</span>
+              </div>
+              <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="homework-progress-bar">
+                <div class="progress-fill" id="homework-progress-fill"></div>
+              </div>
+              <div class="progress-subrow">
+                <span class="progress-steps" id="homework-progress-steps">
+                  <span class="p-step" data-step="optimize">1. Optimize</span>
+                  <span class="p-step" data-step="upload">2. Upload</span>
+                  <span class="p-step" data-step="analyze">3. Analyze</span>
+                </span>
+                <span class="progress-size muted-note" id="homework-progress-size"></span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="recent-sessions" id="homework-recent-sessions" hidden>
@@ -161,8 +200,16 @@
 
         <div class="homework-workspace" id="homework-workspace" hidden>
           <div class="surface overview-surface">
-            <div class="eyebrow">Page Overview</div>
-            <p class="overview-text" id="hw-page-summary"></p>
+            <div class="overview-top">
+              <div class="overview-copy">
+                <div class="eyebrow">Page Overview</div>
+                <p class="overview-text" id="hw-page-summary"></p>
+              </div>
+              <button class="photo-thumb-btn" id="btn-hw-photo" type="button" hidden aria-label="View scanned worksheet photo">
+                <img id="hw-photo-thumb" alt="Scanned worksheet">
+                <span>View Photo</span>
+              </button>
+            </div>
             <div class="exercise-stepper" id="hw-exercise-stepper" role="tablist" aria-label="Exercises"></div>
           </div>
 
@@ -295,6 +342,17 @@
         <button class="btn btn-secondary btn-sm" id="btn-dialog-normal" type="button">Normal</button>
         <button class="btn btn-ghost btn-sm" id="btn-dialog-close" type="button">Done</button>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Scanned Page Photo Lightbox -->
+  <dialog class="photo-dialog" id="photo-dialog">
+    <div class="photo-dialog-bar">
+      <span class="photo-dialog-title">Scanned Page</span>
+      <button class="btn btn-secondary btn-sm" id="btn-photo-close" type="button">Close</button>
+    </div>
+    <div class="photo-dialog-frame">
+      <img id="photo-dialog-img" alt="Scanned page full view">
     </div>
   </dialog>
 
