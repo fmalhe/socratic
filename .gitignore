@@ -1,34 +1,6 @@
-target/
-!.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-
-### IntelliJ IDEA ###
-.idea/
-*.iws
-*.iml
-*.ipr
-out/
-
-### VS Code ###
-.vscode/
-
-### Eclipse ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### OS & Logs ###
+node_modules/
+.wrangler/
+.dev.vars
+dist/
 .DS_Store
 *.log
-
-### Local SQLite DB ###
-data/
-
-### Cloudflare Worker ###
-cloudflare/node_modules/
-cloudflare/.wrangler/
