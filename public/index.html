@@ -6,15 +6,15 @@
   <meta name="description" content="Socratic — Calm, focused multilingual reading and homework tutor for iPad and Android.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Socratic">
-  <meta name="theme-color" content="#F5F5F7">
+  <meta name="theme-color" id="meta-theme-color" content="#0A0B0D">
   <title>Socratic</title>
   <link rel="icon" type="image/svg+xml" href="/icon.svg">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -22,7 +22,7 @@
     <div class="top-bar-inner">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
             <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
           </svg>
@@ -33,19 +33,30 @@
         </div>
       </div>
 
-      <div class="status-pills" aria-label="Progress summary">
-        <button class="status-pill" id="pill-streak" type="button" data-nav="progress">
-          <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <div class="status-pills" aria-label="Progress and controls">
+        <button class="status-pill" id="pill-streak" type="button" data-nav="progress" title="Day streak">
+          <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
           </svg>
           <span class="num" id="header-streak">0</span>
           <span class="pill-label">d</span>
         </button>
-        <button class="status-pill status-pill-star" id="pill-stars" type="button" data-nav="progress">
-          <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <button class="status-pill status-pill-star" id="pill-stars" type="button" data-nav="progress" title="Total stars">
+          <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
           <span class="num" id="header-stars">0</span>
+        </button>
+        <button class="icon-pill" id="btn-theme-toggle" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
+          <svg class="icon" id="theme-icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+          <svg class="icon" id="theme-icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+        </button>
+        <button class="cmd-trigger" id="btn-cmd-open" type="button" aria-label="Open command menu" title="Quick actions (⌘K)">
+          <span class="kbd">⌘K</span>
         </button>
       </div>
     </div>
@@ -380,6 +391,29 @@
     </div>
     <div class="photo-dialog-frame">
       <img id="photo-dialog-img" alt="Scanned page full view">
+    </div>
+  </dialog>
+
+  <!-- Raycast-style Command Palette -->
+  <dialog class="cmd-dialog" id="cmd-dialog" aria-label="Command palette">
+    <div class="cmd-header">
+      <svg class="icon cmd-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input
+        class="cmd-input"
+        id="cmd-input"
+        type="text"
+        placeholder="Type a command or jump to…"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <span class="kbd">ESC</span>
+    </div>
+    <div class="cmd-list" id="cmd-list" role="listbox"></div>
+    <div class="cmd-footer">
+      <span><span class="kbd">↑</span> <span class="kbd">↓</span> Navigate</span>
+      <span><span class="kbd">↵</span> Run</span>
     </div>
   </dialog>
 

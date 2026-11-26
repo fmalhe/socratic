@@ -1298,6 +1298,146 @@ function init() {
     if (e.target === $('photo-dialog')) $('photo-dialog').close();
   });
 
+  /* Theme Toggle (Obsidian Dark default / Alabaster Light) */
+  function applyTheme(theme) {
+    const isLight = theme === 'light';
+    if (isLight) {
+      document.documentElement.dataset.theme = 'light';
+    } else {
+      delete document.documentElement.dataset.theme;
+    }
+    $('theme-icon-sun').hidden = isLight;
+    $('theme-icon-moon').hidden = !isLight;
+    const metaTheme = $('meta-theme-color');
+    if (metaTheme) metaTheme.setAttribute('content', isLight ? '#F6F7F9' : '#0A0B0D');
+    try {
+      localStorage.setItem('socratic-theme', isLight ? 'light' : 'dark');
+    } catch {
+      // ignore storage restrictions
+    }
+  }
+
+  let savedTheme = 'dark';
+  try {
+    savedTheme = localStorage.getItem('socratic-theme') || 'dark';
+  } catch {
+    savedTheme = 'dark';
+  }
+  applyTheme(savedTheme);
+
+  $('btn-theme-toggle').addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+  });
+
+  /* Raycast-style Command Palette (⌘K / Ctrl+K) */
+  const cmdDialog = $('cmd-dialog');
+  const cmdInput = $('cmd-input');
+  const cmdList = $('cmd-list');
+  let cmdSelected = 0;
+
+  const commands = [
+    { label: 'Take Photo to Read', sub: 'Open camera in Read', kbd: 'R', run: () => { switchTab('reading'); $('reading-camera-input').click(); } },
+    { label: 'Scan Homework Page', sub: 'Open camera in Homework', kbd: 'H', run: () => { switchTab('homework'); $('homework-camera-input').click(); } },
+    { label: 'Play / Pause Read Along', sub: 'Toggle lyrics playback', kbd: 'Space', run: () => { switchTab('reading'); lyricsPlayer.togglePlayPause(); } },
+    { label: 'Toggle Reading Speed', sub: 'Switch 1× / 0.75× Slow', kbd: 'S', run: () => { switchTab('reading'); lyricsPlayer.toggleSpeed(); } },
+    { label: 'Go to Read', sub: 'Reading practice', kbd: '1', run: () => switchTab('reading') },
+    { label: 'Go to Homework', sub: 'One exercise at a time', kbd: '2', run: () => switchTab('homework') },
+    { label: 'Go to Progress', sub: 'Stars, streak & words', kbd: '3', run: () => switchTab('progress') },
+    { label: 'Go to Settings', sub: 'Learner profile & voice', kbd: '4', run: () => switchTab('profile') },
+    {
+      label: 'Toggle Light / Dark Theme',
+      sub: 'Obsidian Dark ↔ Alabaster Light',
+      kbd: 'T',
+      run: () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'),
+    },
+  ];
+
+  function getFilteredCommands() {
+    const q = cmdInput.value.trim().toLowerCase();
+    if (!q) return commands;
+    return commands.filter((c) => c.label.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q));
+  }
+
+  function renderCmdList() {
+    const items = getFilteredCommands();
+    cmdSelected = Math.min(cmdSelected, Math.max(0, items.length - 1));
+    cmdList.innerHTML = '';
+    if (!items.length) {
+      cmdList.innerHTML = '<div class="muted-note" style="padding:12px">No matching commands</div>';
+      return;
+    }
+    items.forEach((item, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cmd-item' + (idx === cmdSelected ? ' is-selected' : '');
+      btn.innerHTML = `<span>${item.label}<span class="cmd-item-sub">${item.sub}</span></span><span class="kbd">${item.kbd}</span>`;
+      btn.addEventListener('click', () => {
+        cmdDialog.close();
+        item.run();
+      });
+      cmdList.appendChild(btn);
+    });
+  }
+
+  function openCmdPalette() {
+    cmdInput.value = '';
+    cmdSelected = 0;
+    renderCmdList();
+    cmdDialog.showModal();
+    cmdInput.focus();
+  }
+
+  $('btn-cmd-open').addEventListener('click', openCmdPalette);
+  cmdDialog.addEventListener('click', (e) => {
+    if (e.target === cmdDialog) cmdDialog.close();
+  });
+  cmdInput.addEventListener('input', () => {
+    cmdSelected = 0;
+    renderCmdList();
+  });
+  cmdInput.addEventListener('keydown', (e) => {
+    const items = getFilteredCommands();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      cmdSelected = (cmdSelected + 1) % Math.max(1, items.length);
+      renderCmdList();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      cmdSelected = (cmdSelected - 1 + Math.max(1, items.length)) % Math.max(1, items.length);
+      renderCmdList();
+    } else if (e.key === 'Enter' && items[cmdSelected]) {
+      e.preventDefault();
+      cmdDialog.close();
+      items[cmdSelected].run();
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (cmdDialog.open) {
+        cmdDialog.close();
+      } else {
+        openCmdPalette();
+      }
+      return;
+    }
+    const tag = (e.target?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || cmdDialog.open) return;
+
+    if (e.code === 'Space' && !$('reading-results').hidden && !$('view-reading').hidden) {
+      e.preventDefault();
+      lyricsPlayer.togglePlayPause();
+    } else if (e.key === 'ArrowLeft' && lyricsPlayer.isActive()) {
+      e.preventDefault();
+      lyricsPlayer.prev();
+    } else if (e.key === 'ArrowRight' && lyricsPlayer.isActive()) {
+      e.preventDefault();
+      lyricsPlayer.next();
+    }
+  });
+
   Promise.all([loadProfile(), loadProgress()]).catch((err) => {
     showToast(`Unable to connect to Socratic backend: ${err.message}`);
   });

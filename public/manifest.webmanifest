@@ -4,8 +4,8 @@
   "description": "Multilingual reading and homework tutor for kids",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F5F5F7",
-  "theme_color": "#F5F5F7",
+  "background_color": "#0A0B0D",
+  "theme_color": "#0A0B0D",
   "icons": [
     {
       "src": "/icon.svg",
