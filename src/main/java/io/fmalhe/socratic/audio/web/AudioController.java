@@ -28,8 +28,8 @@ class AudioController {
     @PostMapping("/speak")
     ResponseEntity<byte[]> speak(ProfileId profileId, @Valid @RequestBody SpeakRequest request) {
         var profile = profileFacade.getActiveProfile(profileId);
-        var languageCode = request.languageCode().orElse(profile.targetLanguageCode());
-        var audio = ttsService.synthesize(request.text(), languageCode, profile.ttsVoiceName(), request.slow());
+        var languageCode = request.getLanguageCode().orElse(profile.targetLanguageCode());
+        var audio = ttsService.synthesize(request.getText(), languageCode, profile.ttsVoiceName(), request.isSlow());
         return ResponseEntity.ok()
                 .contentType(AUDIO_MPEG)
                 .body(audio);

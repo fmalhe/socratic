@@ -1,6 +1,5 @@
 package io.fmalhe.socratic.profile;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import org.jspecify.annotations.NullMarked;
 
@@ -14,7 +13,6 @@ public record LanguageCode(@JsonValue String value) {
         value = value.trim();
     }
 
-    @JsonCreator
     public static LanguageCode of(String value) {
         return new LanguageCode(value);
     }

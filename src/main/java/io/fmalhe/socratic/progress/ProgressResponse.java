@@ -1,8 +1,9 @@
 package io.fmalhe.socratic.progress;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import io.fmalhe.socratic.profile.LanguageCode;
 import io.fmalhe.socratic.profile.ProfileId;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 
@@ -11,6 +12,8 @@ import java.util.List;
 import java.util.Optional;
 
 @NullMarked
+@Getter
+@RequiredArgsConstructor
 public final class ProgressResponse {
 
     private final ProfileId profileId;
@@ -20,49 +23,12 @@ public final class ProgressResponse {
     private final int pagesReadCount;
     private final List<SavedWordDto> recentWords;
 
-    public ProgressResponse(
-            ProfileId profileId,
-            int totalStars,
-            int currentStreakDays,
-            @Nullable LocalDate lastActivityDate,
-            int pagesReadCount,
-            List<SavedWordDto> recentWords) {
-        this.profileId = profileId;
-        this.totalStars = totalStars;
-        this.currentStreakDays = currentStreakDays;
-        this.lastActivityDate = lastActivityDate;
-        this.pagesReadCount = pagesReadCount;
-        this.recentWords = List.copyOf(recentWords);
-    }
-
-    @JsonProperty("profileId")
-    public ProfileId profileId() {
-        return profileId;
-    }
-
-    @JsonProperty("totalStars")
-    public int totalStars() {
-        return totalStars;
-    }
-
-    @JsonProperty("currentStreakDays")
-    public int currentStreakDays() {
-        return currentStreakDays;
-    }
-
-    @JsonProperty("lastActivityDate")
-    public Optional<LocalDate> lastActivityDate() {
+    public Optional<LocalDate> getLastActivityDate() {
         return Optional.ofNullable(lastActivityDate);
     }
 
-    @JsonProperty("pagesReadCount")
-    public int pagesReadCount() {
-        return pagesReadCount;
-    }
-
-    @JsonProperty("recentWords")
-    public List<SavedWordDto> recentWords() {
-        return recentWords;
+    public List<SavedWordDto> getRecentWords() {
+        return List.copyOf(recentWords);
     }
 
     @NullMarked

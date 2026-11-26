@@ -100,9 +100,9 @@ class HomeworkModuleIntegrationTest {
         var completed = sessionService.completeExercise(ProfileId.DEFAULT, session.id(), firstExercise.id());
         assertThat(completed.status()).isEqualTo(ExerciseStatus.COMPLETED);
         assertThat(completed.messages()).hasSize(2);
-        assertThat(completed.messages().getFirst().sender()).isEqualTo(MessageSender.CHILD);
-        assertThat(completed.messages().get(1).sender()).isEqualTo(MessageSender.TUTOR);
-        assertThat(completed.messages().get(1).targetPhrase()).hasValue("Boa! A mesa!");
+        assertThat(completed.messages().getFirst().getSender()).isEqualTo(MessageSender.CHILD);
+        assertThat(completed.messages().get(1).getSender()).isEqualTo(MessageSender.TUTOR);
+        assertThat(completed.messages().get(1).getTargetPhrase()).hasValue("Boa! A mesa!");
 
         var reloaded = sessionService.getSession(ProfileId.DEFAULT, session.id());
         assertThat(reloaded.exercises().getFirst().status()).isEqualTo(ExerciseStatus.COMPLETED);

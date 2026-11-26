@@ -1,11 +1,10 @@
 package io.fmalhe.socratic.profile;
 
 import com.fasterxml.jackson.annotation.JsonValue;
-import jakarta.validation.constraints.Positive;
 import org.jspecify.annotations.NullMarked;
 
 @NullMarked
-public record ProfileId(@JsonValue @Positive long value) {
+public record ProfileId(@JsonValue long value) {
 
     public static final ProfileId DEFAULT = new ProfileId(1L);
 

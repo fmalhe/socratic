@@ -1,6 +1,5 @@
 package io.fmalhe.socratic.homework;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import org.jspecify.annotations.NullMarked;
 
@@ -13,7 +12,6 @@ public record HomeworkExerciseId(@JsonValue long value) {
         }
     }
 
-    @JsonCreator
     public static HomeworkExerciseId of(long value) {
         return new HomeworkExerciseId(value);
     }

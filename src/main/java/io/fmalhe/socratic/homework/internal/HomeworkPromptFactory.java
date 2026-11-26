@@ -98,7 +98,7 @@ public class HomeworkPromptFactory {
         var formattedHistory = history.isEmpty()
                 ? "(No messages yet — this is the child's first reply.)"
                 : history.stream()
-                        .map(m -> m.sender().name() + ": " + m.content())
+                        .map(m -> m.getSender().name() + ": " + m.getContent())
                         .collect(Collectors.joining("\n"));
         return new PromptTemplate(PING_PONG_TEMPLATE).render(Map.of(
                 "age", profile.age().value(),
