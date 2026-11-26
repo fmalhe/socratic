@@ -1047,20 +1047,42 @@ async function queryHomeworkSessions(q) {
   }
 }
 
+let hwPagesOpen = false;
+function setHwPagesOpen(open) {
+  hwPagesOpen = open;
+  const drawer = $('homework-recent-sessions');
+  const toggleBtn = $('btn-hw-pages-toggle');
+  if (drawer) drawer.hidden = !open;
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(open));
+}
+
 function renderSessionChips() {
   const container = $('homework-recent-sessions');
   const chips = $('session-chips');
   const searchInput = $('hw-search-input');
-  if (!state.homeworkSessions.length && !hwSearchQuery) {
+  const toggleBtn = $('btn-hw-pages-toggle');
+  const toggleLabel = $('hw-pages-label');
+
+  const count = state.homeworkSessions.length;
+  if (!count && !hwSearchQuery) {
     container.hidden = true;
+    if (toggleBtn) toggleBtn.hidden = true;
     return;
   }
-  container.hidden = false;
-  if (searchInput) {
-    searchInput.hidden = state.homeworkSessions.length < 4 && !hwSearchQuery;
+
+  if (toggleBtn) {
+    toggleBtn.hidden = false;
+    if (toggleLabel) {
+      toggleLabel.textContent = state.activeSession ? `#${state.activeSession.id}` : `${count}`;
+    }
   }
+  container.hidden = !hwPagesOpen && !hwSearchQuery;
+  if (searchInput) {
+    searchInput.hidden = count < 4 && !hwSearchQuery;
+  }
+
   chips.innerHTML = '';
-  if (!state.homeworkSessions.length && hwSearchQuery) {
+  if (!count && hwSearchQuery) {
     chips.innerHTML = '<span class="muted-note">No matching pages found.</span>';
     return;
   }
@@ -1069,8 +1091,11 @@ function renderSessionChips() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'session-chip' + (state.activeSession?.id === session.id ? ' is-active' : '');
-    btn.textContent = `Page #${session.id} (${done}/${session.exercises.length})`;
-    btn.addEventListener('click', () => selectHomeworkSession(session));
+    btn.textContent = `#${session.id} (${done}/${session.exercises.length})`;
+    btn.addEventListener('click', () => {
+      setHwPagesOpen(false);
+      selectHomeworkSession(session);
+    });
     chips.appendChild(btn);
   });
 }
@@ -1393,6 +1418,7 @@ function init() {
 
   $('homework-camera-input').addEventListener('change', onFileSelected(handleHomeworkScan));
   $('homework-library-input').addEventListener('change', onFileSelected(handleHomeworkScan));
+  $('btn-hw-pages-toggle').addEventListener('click', () => setHwPagesOpen(!hwPagesOpen));
   let hwSearchTimer = null;
   $('hw-search-input').addEventListener('input', (e) => {
     clearTimeout(hwSearchTimer);

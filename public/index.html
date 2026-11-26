@@ -74,25 +74,19 @@
 
     <main class="main-content">
       <!-- READING VIEW -->
-      <section class="view is-active" id="view-reading" aria-labelledby="reading-heading">
-        <div class="capture-surface">
-          <div class="capture-copy">
-            <h2 id="reading-heading">Read a page together</h2>
-            <p>Snap a book page to listen along and tap tricky words.</p>
-          </div>
-          <div class="capture-actions">
-            <label class="btn btn-primary" for="reading-camera-input" id="btn-reading-camera">
-              <span aria-hidden="true">📸</span>
-              <span>Take Photo</span>
-            </label>
-            <input id="reading-camera-input" type="file" accept="image/*" capture="environment" hidden>
+      <section class="view is-active" id="view-reading" aria-labelledby="tab-reading">
+        <div class="quick-bar">
+          <label class="btn btn-primary btn-sm" for="reading-camera-input" id="btn-reading-camera">
+            <span aria-hidden="true">📸</span>
+            <span>Photo</span>
+          </label>
+          <input id="reading-camera-input" type="file" accept="image/*" capture="environment" hidden>
 
-            <label class="btn btn-secondary" for="reading-library-input" id="btn-reading-library">
-              <span aria-hidden="true">🖼️</span>
-              <span>Gallery</span>
-            </label>
-            <input id="reading-library-input" type="file" accept="image/*" hidden>
-          </div>
+          <label class="btn btn-secondary btn-sm" for="reading-library-input" id="btn-reading-library">
+            <span aria-hidden="true">🖼️</span>
+            <span>Gallery</span>
+          </label>
+          <input id="reading-library-input" type="file" accept="image/*" hidden>
         </div>
 
         <div class="progress-card surface" id="reading-loading" hidden>
@@ -130,14 +124,6 @@
         </div>
 
         <div id="reading-results" hidden>
-          <div class="section-bar">
-            <h3>📖 Read Along</h3>
-            <div class="section-actions">
-              <button class="btn btn-secondary btn-sm" id="btn-reading-photo" type="button" hidden>🖼️ Photo</button>
-              <button class="btn btn-success btn-sm" id="btn-finish-reading" type="button">🎉 Finish · +10 ⭐</button>
-            </div>
-          </div>
-
           <div class="lyrics-player surface" id="lyrics-player" aria-label="Read along controls">
             <div class="lyrics-controls">
               <button class="btn btn-primary btn-sm" id="btn-lyrics-play" type="button">
@@ -146,15 +132,16 @@
               </button>
               <button class="btn btn-secondary btn-sm" id="btn-lyrics-stop" type="button" disabled>
                 <span aria-hidden="true">■</span>
-                <span>Stop</span>
               </button>
               <button class="btn btn-ghost btn-sm" id="btn-lyrics-prev" type="button" aria-label="Previous sentence" disabled>‹</button>
               <button class="btn btn-ghost btn-sm" id="btn-lyrics-next" type="button" aria-label="Next sentence" disabled>›</button>
               <button class="btn btn-secondary btn-sm" id="btn-lyrics-speed" type="button" aria-pressed="false" title="Slow reading">🐢</button>
+              <button class="btn btn-secondary btn-sm" id="btn-reading-photo" type="button" hidden title="View Photo">🖼️</button>
+              <button class="btn btn-success btn-sm" id="btn-finish-reading" type="button">🎉 +10 ⭐</button>
             </div>
             <div class="lyrics-status">
-              <span class="lyrics-counter num" id="lyrics-counter">Tap Play or a line</span>
-              <span class="voice-badge" id="lyrics-voice-badge" hidden>Natural Voice</span>
+              <span class="lyrics-counter num" id="lyrics-counter"></span>
+              <span class="voice-badge" id="lyrics-voice-badge" hidden>Natural</span>
             </div>
           </div>
 
@@ -163,25 +150,24 @@
       </section>
 
       <!-- HOMEWORK VIEW -->
-      <section class="view" id="view-homework" aria-labelledby="homework-heading" hidden>
-        <div class="capture-surface">
-          <div class="capture-copy">
-            <h2 id="homework-heading">Homework helper</h2>
-            <p>Snap a photo of your page to listen to the text, words, and hints.</p>
-          </div>
-          <div class="capture-actions">
-            <label class="btn btn-primary" for="homework-camera-input" id="btn-homework-camera">
-              <span aria-hidden="true">📸</span>
-              <span>Take Photo</span>
-            </label>
-            <input id="homework-camera-input" type="file" accept="image/*" capture="environment" hidden>
+      <section class="view" id="view-homework" aria-labelledby="tab-homework" hidden>
+        <div class="quick-bar">
+          <label class="btn btn-primary btn-sm" for="homework-camera-input" id="btn-homework-camera">
+            <span aria-hidden="true">📸</span>
+            <span>Photo</span>
+          </label>
+          <input id="homework-camera-input" type="file" accept="image/*" capture="environment" hidden>
 
-            <label class="btn btn-secondary" for="homework-library-input" id="btn-homework-library">
-              <span aria-hidden="true">🖼️</span>
-              <span>Gallery</span>
-            </label>
-            <input id="homework-library-input" type="file" accept="image/*" hidden>
-          </div>
+          <label class="btn btn-secondary btn-sm" for="homework-library-input" id="btn-homework-library">
+            <span aria-hidden="true">🖼️</span>
+            <span>Gallery</span>
+          </label>
+          <input id="homework-library-input" type="file" accept="image/*" hidden>
+
+          <button class="btn btn-secondary btn-sm quick-bar-end" id="btn-hw-pages-toggle" type="button" hidden aria-expanded="false">
+            <span aria-hidden="true">📚</span>
+            <span id="hw-pages-label">Pages</span>
+          </button>
         </div>
 
         <div class="progress-card surface" id="homework-loading" hidden>
@@ -218,17 +204,14 @@
           <pre class="error-banner-msg" id="homework-error-msg"></pre>
         </div>
 
-        <div class="recent-sessions" id="homework-recent-sessions" hidden>
-          <div class="section-bar">
-            <h3>Recent Pages</h3>
-            <input
-              class="search-input"
-              id="hw-search-input"
-              type="search"
-              placeholder="Search past pages…"
-              aria-label="Search past homework pages"
-            >
-          </div>
+        <div class="recent-sessions surface" id="homework-recent-sessions" hidden>
+          <input
+            class="search-input"
+            id="hw-search-input"
+            type="search"
+            placeholder="Search…"
+            aria-label="Search past homework pages"
+          >
           <div class="session-chips" id="session-chips"></div>
         </div>
 

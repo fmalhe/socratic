@@ -1576,6 +1576,27 @@ dialog {
   }
 }
 
+/* Compact 1-Row Quick Action Bar & Collapsible Pages Drawer */
+.quick-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.quick-bar-end {
+  margin-left: auto;
+}
+
+.recent-sessions.surface {
+  padding: 12px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1585,18 +1606,26 @@ dialog {
 }
 
 @media (max-width: 680px) {
+  .app-shell {
+    padding-top: 12px;
+  }
   .segmented-nav {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(4, 1fr);
+    margin-bottom: 14px;
+  }
+  .seg-btn {
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 4px;
+    min-height: 44px;
+    font-size: 0.72rem;
   }
   .stats-grid,
   .form-grid {
     grid-template-columns: 1fr;
   }
   .reading-text {
-    font-size: 1.22rem;
-  }
-  .capture-surface {
-    padding: 18px 20px;
+    font-size: 1.24rem;
   }
   .cmd-trigger {
     display: none;
@@ -1604,24 +1633,6 @@ dialog {
 }
 
 @media (max-width: 520px) {
-  .capture-actions {
-    width: 100%;
-  }
-  .capture-actions .btn {
-    flex: 1 1 136px;
-    min-height: 44px;
-  }
-  .overview-top {
-    flex-direction: column;
-  }
-  .photo-thumb-btn {
-    flex-direction: row;
-    padding: 5px 11px 5px 5px;
-  }
-  .photo-thumb-btn img {
-    width: 38px;
-    height: 38px;
-  }
   .search-input {
     max-width: none;
     width: 100%;
