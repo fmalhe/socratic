@@ -88,7 +88,7 @@ describe("Worker HTTP routes", () => {
     expect(allowed.status).toBe(200);
   });
 
-  it("returns 501 on /api/audio/speak when GOOGLE_TTS_API_KEY is unset", async () => {
+  it("returns 501 on /api/audio/speak when no cloud TTS keys are configured", async () => {
     const res = await app.request(
       "/api/audio/speak",
       {
@@ -96,7 +96,7 @@ describe("Worker HTTP routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "Bom dia!", slow: true }),
       },
-      makeEnv(),
+      makeEnv({ GEMINI_API_KEY: "" }),
     );
     expect(res.status).toBe(501);
   });

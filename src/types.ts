@@ -1,10 +1,12 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
-  /** Optional Cloudflare R2 bucket for persisting scanned page photos. */
+  /** Optional Cloudflare R2 bucket for persisting scanned page photos and caching TTS audio. */
   UPLOADS?: R2Bucket;
   GEMINI_API_KEY: string;
   GEMINI_MODEL?: string;
+  GEMINI_TTS_MODEL?: string;
+  GEMINI_TTS_VOICE?: string;
   GOOGLE_TTS_API_KEY?: string;
   /** Optional comma-separated list of allowed home IPs (e.g. "203.0.113.10"). When unset, rely on Cloudflare Access. */
   ALLOWED_IPS?: string;

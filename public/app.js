@@ -28,12 +28,25 @@ function pickBestVoice(langCode) {
   if (!cachedVoices.length || !langCode) return null;
   const target = langCode.toLowerCase();
   const base = target.split('-')[0];
-  return (
-    cachedVoices.find((v) => v.lang && v.lang.toLowerCase() === target) ||
-    cachedVoices.find((v) => v.lang && v.lang.toLowerCase().startsWith(`${base}-`)) ||
-    cachedVoices.find((v) => v.lang && v.lang.toLowerCase() === base) ||
-    null
-  );
+  const candidates = cachedVoices.filter((v) => {
+    const lang = (v.lang || '').toLowerCase();
+    return lang === target || lang.startsWith(`${base}-`) || lang === base;
+  });
+  if (!candidates.length) return null;
+
+  const scoreVoice = (v) => {
+    let score = 0;
+    const lang = (v.lang || '').toLowerCase();
+    const name = (v.name || '').toLowerCase();
+    if (lang === target) score += 40;
+    if (/natural|neural|wavenet|chirp|enhanced|premium|siri/i.test(name)) score += 35;
+    if (/google|microsoft|joana|catarina|inês|ines/i.test(name)) score += 18;
+    if (!v.localService) score += 8; // Network/cloud voices on Android/Chrome are much less robotic
+    return score;
+  };
+
+  candidates.sort((a, b) => scoreVoice(b) - scoreVoice(a));
+  return candidates[0];
 }
 
 let toastTimer = null;
@@ -255,10 +268,44 @@ function openPhotoDialog(url) {
   $('photo-dialog').showModal();
 }
 
-/* Safari & Android Chrome/Brave friendly TTS with automatic speechSynthesis fallback on HTTP 501 */
+/* Cached cloud TTS fetcher (Gemini 3.8 Flash-Lite TTS / Google Cloud TTS + R2 cache) */
+const ttsAudioCache = new Map();
+async function fetchTtsAudio(text, slow = false) {
+  const langCode = state.profile?.targetLanguageCode || 'pt-PT';
+  const voice = state.profile?.ttsVoiceName || '';
+  const key = `${langCode}|${voice}|${slow ? '1' : '0'}|${text}`;
+  if (ttsAudioCache.has(key)) {
+    return ttsAudioCache.get(key);
+  }
+  const promise = (async () => {
+    try {
+      const res = await fetch('/api/audio/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, languageCode: langCode, slow }),
+      });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const provider = res.headers.get('X-Audio-Provider') || 'cloud';
+      return { url, provider };
+    } catch {
+      return null;
+    }
+  })();
+  ttsAudioCache.set(key, promise);
+  const result = await promise;
+  if (!result) ttsAudioCache.delete(key);
+  return result;
+}
+
+/* Safari & Android Chrome/Brave friendly TTS with automatic speechSynthesis fallback */
 let currentAudio = null;
 async function speakText(text, slow = false) {
   if (!text) return;
+  if (typeof lyricsPlayer !== 'undefined' && lyricsPlayer.isActive()) {
+    lyricsPlayer.stop();
+  }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
@@ -267,28 +314,12 @@ async function speakText(text, slow = false) {
     window.speechSynthesis.cancel();
   }
 
-  try {
-    const res = await fetch('/api/audio/speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        languageCode: state.profile?.targetLanguageCode || null,
-        slow,
-      }),
-    });
-
-    if (res.ok) {
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      currentAudio = audio;
-      audio.onended = () => URL.revokeObjectURL(url);
-      await audio.play();
-      return;
-    }
-  } catch {
-    // Fall through to browser speechSynthesis
+  const clip = await fetchTtsAudio(text, slow);
+  if (clip?.url) {
+    const audio = new Audio(clip.url);
+    currentAudio = audio;
+    await audio.play();
+    return;
   }
 
   if (window.speechSynthesis) {
@@ -306,6 +337,9 @@ async function speakText(text, slow = false) {
 
 /* Navigation */
 function switchTab(tabName) {
+  if (tabName !== 'reading' && typeof lyricsPlayer !== 'undefined' && lyricsPlayer.isActive()) {
+    lyricsPlayer.stop();
+  }
   document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.tab === tabName);
   });
@@ -371,12 +405,409 @@ function openWordDialog(wordHint) {
   speakText(wordHint.word, true);
 }
 
+/* Spotify-Lyrics-Style Read Along Engine */
+function tokenizeSentenceWords(text) {
+  const tokens = [];
+  const regex = /\S+/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    tokens.push({
+      text: match[0],
+      charStart: match.index,
+      charEnd: match.index + match[0].length,
+    });
+  }
+  return tokens;
+}
+
+function computeWordIntervals(tokens) {
+  const weights = tokens.map((t) => {
+    let w = Math.max(2, t.text.replace(/[.,!?;:()"'«»—-]/g, '').length);
+    if (/[,;:]$/.test(t.text)) w += 3;
+    if (/[.!?…]$/.test(t.text)) w += 5;
+    return w;
+  });
+  const total = weights.reduce((sum, w) => sum + w, 0) || 1;
+  let acc = 0;
+  return weights.map((w) => {
+    const start = acc / total;
+    acc += w;
+    const end = acc / total;
+    return { start, end };
+  });
+}
+
+function createLyricsPlayer() {
+  let sentences = [];
+  let cardEls = [];
+  let wordSpanLists = [];
+  let tokenLists = [];
+  let intervalLists = [];
+
+  let status = 'idle'; // 'idle' | 'loading' | 'playing' | 'paused'
+  let currentIndex = -1;
+  let slow = false;
+  let playRunId = 0;
+  let activeAudio = null;
+  let rafId = null;
+  let fallbackTimer = null;
+  let voiceMode = null; // 'natural' | 'device'
+
+  function stopAnimators() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (fallbackTimer !== null) {
+      clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    }
+  }
+
+  function updateControls() {
+    const playBtn = $('btn-lyrics-play');
+    const playIcon = $('lyrics-play-icon');
+    const playLabel = $('lyrics-play-label');
+    const stopBtn = $('btn-lyrics-stop');
+    const prevBtn = $('btn-lyrics-prev');
+    const nextBtn = $('btn-lyrics-next');
+    const speedBtn = $('btn-lyrics-speed');
+    const counter = $('lyrics-counter');
+    const badge = $('lyrics-voice-badge');
+
+    const hasLines = sentences.length > 0;
+    playBtn.disabled = !hasLines;
+    stopBtn.disabled = status === 'idle';
+    prevBtn.disabled = !hasLines || currentIndex <= 0;
+    nextBtn.disabled = !hasLines || currentIndex < 0 || currentIndex >= sentences.length - 1;
+
+    if (status === 'loading') {
+      playIcon.textContent = '…';
+      playLabel.textContent = 'Loading';
+    } else if (status === 'playing') {
+      playIcon.textContent = '⏸';
+      playLabel.textContent = 'Pause';
+    } else if (status === 'paused') {
+      playIcon.textContent = '▶';
+      playLabel.textContent = 'Resume';
+    } else {
+      playIcon.textContent = '▶';
+      playLabel.textContent = 'Play';
+    }
+
+    speedBtn.textContent = slow ? '0.75× Slow' : '1× Speed';
+    speedBtn.setAttribute('aria-pressed', String(slow));
+
+    if (!hasLines) {
+      counter.textContent = '';
+    } else if (currentIndex >= 0) {
+      const stateSuffix = status === 'paused' ? ' · Paused' : '';
+      counter.textContent = `Line ${currentIndex + 1} of ${sentences.length}${stateSuffix}`;
+    } else {
+      counter.textContent = 'Tap Play or any sentence';
+    }
+
+    if (voiceMode) {
+      badge.hidden = false;
+      badge.textContent = voiceMode === 'natural' ? 'Natural Voice' : 'Device Voice';
+      badge.classList.toggle('is-fallback', voiceMode !== 'natural');
+    } else {
+      badge.hidden = true;
+    }
+  }
+
+  function clearWordHighlights(idx) {
+    const spans = wordSpanLists[idx];
+    if (!spans) return;
+    spans.forEach((span) => {
+      span.classList.remove('is-spoken', 'is-current');
+    });
+  }
+
+  function highlightWord(lineIdx, wordIdx) {
+    const spans = wordSpanLists[lineIdx];
+    if (!spans) return;
+    for (let i = 0; i < spans.length; i += 1) {
+      spans[i].classList.toggle('is-spoken', i < wordIdx);
+      spans[i].classList.toggle('is-current', i === wordIdx);
+    }
+  }
+
+  function highlightAllSpoken(lineIdx) {
+    const spans = wordSpanLists[lineIdx];
+    if (!spans) return;
+    spans.forEach((span) => {
+      span.classList.add('is-spoken');
+      span.classList.remove('is-current');
+    });
+  }
+
+  function setActiveLine(idx) {
+    const list = $('reading-sentences');
+    list.classList.toggle('is-reading-along', idx >= 0);
+    cardEls.forEach((card, i) => {
+      const active = i === idx;
+      card.classList.toggle('is-active-line', active);
+      if (!active) clearWordHighlights(i);
+    });
+    if (idx >= 0 && cardEls[idx]) {
+      cardEls[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function teardownPlayback() {
+    stopAnimators();
+    if (activeAudio) {
+      activeAudio.onended = null;
+      activeAudio.onerror = null;
+      activeAudio.pause();
+      activeAudio = null;
+    }
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  function syncAudioHighlight(lineIdx, audio, runId) {
+    const intervals = intervalLists[lineIdx] || [];
+    const tick = () => {
+      if (runId !== playRunId || status !== 'playing' || !audio) return;
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        const progress = Math.min(0.999, Math.max(0, audio.currentTime / audio.duration));
+        let wordIdx = intervals.findIndex((iv) => progress >= iv.start && progress < iv.end);
+        if (wordIdx < 0) wordIdx = Math.max(0, intervals.length - 1);
+        highlightWord(lineIdx, wordIdx);
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+  }
+
+  async function playSentence(idx, overrideSlow) {
+    if (idx < 0 || idx >= sentences.length) {
+      stop();
+      return;
+    }
+    if (typeof overrideSlow === 'boolean') {
+      slow = overrideSlow;
+    }
+    teardownPlayback();
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+
+    playRunId += 1;
+    const runId = playRunId;
+    currentIndex = idx;
+    status = 'loading';
+    setActiveLine(idx);
+    highlightWord(idx, 0);
+    updateControls();
+
+    const text = sentences[idx].targetText;
+
+    // Pre-fetch the next sentence in background so transitions are seamless
+    if (idx + 1 < sentences.length) {
+      fetchTtsAudio(sentences[idx + 1].targetText, slow).catch(() => {});
+    }
+
+    const clip = await fetchTtsAudio(text, slow);
+    if (runId !== playRunId) return;
+
+    if (clip?.url) {
+      voiceMode = 'natural';
+      const audio = new Audio(clip.url);
+      activeAudio = audio;
+      status = 'playing';
+      updateControls();
+
+      audio.onended = () => {
+        if (runId !== playRunId) return;
+        stopAnimators();
+        highlightAllSpoken(idx);
+        if (idx + 1 < sentences.length) {
+          playSentence(idx + 1);
+        } else {
+          stop();
+        }
+      };
+      audio.onerror = () => {
+        if (runId !== playRunId) return;
+        playWithSpeechSynthesis(idx, runId);
+      };
+
+      try {
+        await audio.play();
+        if (runId !== playRunId) return;
+        syncAudioHighlight(idx, audio, runId);
+      } catch {
+        if (runId !== playRunId) return;
+        playWithSpeechSynthesis(idx, runId);
+      }
+      return;
+    }
+
+    playWithSpeechSynthesis(idx, runId);
+  }
+
+  function playWithSpeechSynthesis(idx, runId) {
+    if (!window.speechSynthesis) {
+      showToast('Audio playback is unavailable in this browser.');
+      stop();
+      return;
+    }
+    voiceMode = 'device';
+    status = 'playing';
+    updateControls();
+
+    const text = sentences[idx].targetText;
+    const tokens = tokenLists[idx] || [];
+    const intervals = intervalLists[idx] || [];
+    const langCode = state.profile?.targetLanguageCode || 'pt-PT';
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = langCode;
+    const voice = pickBestVoice(langCode);
+    if (voice) utterance.voice = voice;
+    utterance.rate = slow ? 0.72 : 0.96;
+
+    let boundarySeen = false;
+    const startedAt = performance.now();
+    // Estimate duration (~13 chars/sec normal, ~9.5 chars/sec slow) as fallback when Android Chrome omits onboundary
+    const estDurationMs = Math.max(900, (text.length / (slow ? 9.5 : 13.5)) * 1000);
+
+    utterance.onboundary = (evt) => {
+      if (runId !== playRunId || status !== 'playing') return;
+      if (typeof evt.charIndex === 'number') {
+        boundarySeen = true;
+        const wordIdx = tokens.findIndex((t) => evt.charIndex >= t.charStart && evt.charIndex <= t.charEnd);
+        if (wordIdx >= 0) {
+          highlightWord(idx, wordIdx);
+        }
+      }
+    };
+
+    fallbackTimer = setInterval(() => {
+      if (runId !== playRunId || status !== 'playing' || boundarySeen) return;
+      const frac = Math.min(0.99, (performance.now() - startedAt) / estDurationMs);
+      let wordIdx = intervals.findIndex((iv) => frac >= iv.start && frac < iv.end);
+      if (wordIdx < 0) wordIdx = Math.max(0, intervals.length - 1);
+      highlightWord(idx, wordIdx);
+    }, 90);
+
+    utterance.onend = () => {
+      if (runId !== playRunId) return;
+      stopAnimators();
+      highlightAllSpoken(idx);
+      if (idx + 1 < sentences.length) {
+        playSentence(idx + 1);
+      } else {
+        stop();
+      }
+    };
+
+    utterance.onerror = () => {
+      if (runId !== playRunId) return;
+      stop();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function pause() {
+    if (status !== 'playing' && status !== 'loading') return;
+    stopAnimators();
+    if (activeAudio) {
+      activeAudio.pause();
+      status = 'paused';
+      updateControls();
+      return;
+    }
+    // speechSynthesis pause is unreliable on Android Chrome, so cancel and resume cleanly from this line
+    playRunId += 1;
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    status = 'paused';
+    updateControls();
+  }
+
+  function resume() {
+    if (status !== 'paused') return;
+    if (activeAudio) {
+      status = 'playing';
+      updateControls();
+      const runId = playRunId;
+      activeAudio.play().then(() => {
+        if (runId === playRunId) syncAudioHighlight(currentIndex, activeAudio, runId);
+      }).catch(() => playSentence(currentIndex));
+      return;
+    }
+    playSentence(Math.max(0, currentIndex));
+  }
+
+  function stop() {
+    playRunId += 1;
+    teardownPlayback();
+    status = 'idle';
+    currentIndex = -1;
+    setActiveLine(-1);
+    cardEls.forEach((_, i) => clearWordHighlights(i));
+    updateControls();
+  }
+
+  return {
+    load(pageSentences, cards, spans, tokens) {
+      stop();
+      sentences = pageSentences || [];
+      cardEls = cards;
+      wordSpanLists = spans;
+      tokenLists = tokens;
+      intervalLists = tokens.map(computeWordIntervals);
+      updateControls();
+    },
+    isActive() {
+      return status !== 'idle';
+    },
+    playFrom(idx, overrideSlow) {
+      playSentence(idx, overrideSlow);
+    },
+    togglePlayPause() {
+      if (status === 'playing' || status === 'loading') {
+        pause();
+      } else if (status === 'paused') {
+        resume();
+      } else if (sentences.length > 0) {
+        playSentence(0);
+      }
+    },
+    stop,
+    prev() {
+      if (currentIndex > 0) playSentence(currentIndex - 1);
+    },
+    next() {
+      if (currentIndex >= 0 && currentIndex + 1 < sentences.length) {
+        playSentence(currentIndex + 1);
+      }
+    },
+    toggleSpeed() {
+      slow = !slow;
+      updateControls();
+      if (status === 'playing' && currentIndex >= 0) {
+        playSentence(currentIndex, slow);
+      }
+    },
+  };
+}
+
+const lyricsPlayer = createLyricsPlayer();
 const readingProgress = createScanProgress('reading');
 const homeworkProgress = createScanProgress('homework');
 
 /* Reading Flow */
 async function handleReadingUpload(file) {
   if (!file) return;
+  lyricsPlayer.stop();
   const localUrl = URL.createObjectURL(file);
   if (state.readingPreviewUrl) {
     URL.revokeObjectURL(state.readingPreviewUrl);
@@ -422,13 +853,31 @@ function renderReadingPage() {
   const list = $('reading-sentences');
   list.innerHTML = '';
 
-  page.sentences.forEach((sentence) => {
+  const cards = [];
+  const wordSpanLists = [];
+  const tokenLists = [];
+
+  page.sentences.forEach((sentence, idx) => {
     const card = document.createElement('article');
     card.className = 'sentence-card';
 
     const target = document.createElement('p');
-    target.className = 'reading-text';
-    target.textContent = sentence.targetText;
+    target.className = 'reading-text reading-text-interactive';
+    target.title = 'Tap to read from this sentence';
+    target.addEventListener('click', () => lyricsPlayer.playFrom(idx));
+
+    const tokens = tokenizeSentenceWords(sentence.targetText);
+    const spans = [];
+    tokens.forEach((tok, tIdx) => {
+      const span = document.createElement('span');
+      span.className = 'karaoke-word';
+      span.textContent = tok.text;
+      target.appendChild(span);
+      spans.push(span);
+      if (tIdx < tokens.length - 1) {
+        target.appendChild(document.createTextNode(' '));
+      }
+    });
 
     const summary = document.createElement('p');
     summary.className = 'native-summary';
@@ -440,14 +889,14 @@ function renderReadingPage() {
     const btnListen = document.createElement('button');
     btnListen.type = 'button';
     btnListen.className = 'btn btn-secondary btn-sm';
-    btnListen.textContent = 'Listen';
-    btnListen.addEventListener('click', () => speakText(sentence.targetText, false));
+    btnListen.textContent = 'Play Here';
+    btnListen.addEventListener('click', () => lyricsPlayer.playFrom(idx, false));
 
     const btnSlow = document.createElement('button');
     btnSlow.type = 'button';
     btnSlow.className = 'btn btn-secondary btn-sm';
     btnSlow.textContent = '0.75× Slow';
-    btnSlow.addEventListener('click', () => speakText(sentence.targetText, true));
+    btnSlow.addEventListener('click', () => lyricsPlayer.playFrom(idx, true));
 
     audioRow.append(btnListen, btnSlow);
 
@@ -464,8 +913,13 @@ function renderReadingPage() {
 
     card.append(target, summary, audioRow, wordsRow);
     list.appendChild(card);
+
+    cards.push(card);
+    wordSpanLists.push(spans);
+    tokenLists.push(tokens);
   });
 
+  lyricsPlayer.load(page.sentences, cards, wordSpanLists, tokenLists);
   $('reading-results').hidden = false;
 }
 
@@ -769,7 +1223,11 @@ function init() {
   $('btn-reading-photo').addEventListener('click', () => {
     openPhotoDialog(state.readingPage?.imageUrl || state.readingPreviewUrl);
   });
-  $('btn-read-all').addEventListener('click', () => speakText(state.readingPage?.fullText, false));
+  $('btn-lyrics-play').addEventListener('click', () => lyricsPlayer.togglePlayPause());
+  $('btn-lyrics-stop').addEventListener('click', () => lyricsPlayer.stop());
+  $('btn-lyrics-prev').addEventListener('click', () => lyricsPlayer.prev());
+  $('btn-lyrics-next').addEventListener('click', () => lyricsPlayer.next());
+  $('btn-lyrics-speed').addEventListener('click', () => lyricsPlayer.toggleSpeed());
   $('btn-finish-reading').addEventListener('click', finishReadingPage);
 
   $('homework-camera-input').addEventListener('change', onFileSelected(handleHomeworkScan));

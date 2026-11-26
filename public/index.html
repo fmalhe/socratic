@@ -131,13 +131,33 @@
 
         <div id="reading-results" hidden>
           <div class="section-bar">
-            <h3>Sentences</h3>
+            <h3>Read Along</h3>
             <div class="section-actions">
               <button class="btn btn-secondary btn-sm" id="btn-reading-photo" type="button" hidden>View Photo</button>
-              <button class="btn btn-secondary btn-sm" id="btn-read-all" type="button">Read Full Page</button>
               <button class="btn btn-success btn-sm" id="btn-finish-reading" type="button">Finish Page · +10</button>
             </div>
           </div>
+
+          <div class="lyrics-player surface" id="lyrics-player" aria-label="Read along controls">
+            <div class="lyrics-controls">
+              <button class="btn btn-primary btn-sm" id="btn-lyrics-play" type="button">
+                <span id="lyrics-play-icon" aria-hidden="true">▶</span>
+                <span id="lyrics-play-label">Play</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-lyrics-stop" type="button" disabled>
+                <span aria-hidden="true">■</span>
+                <span>Stop</span>
+              </button>
+              <button class="btn btn-ghost btn-sm" id="btn-lyrics-prev" type="button" aria-label="Previous sentence" disabled>‹</button>
+              <button class="btn btn-ghost btn-sm" id="btn-lyrics-next" type="button" aria-label="Next sentence" disabled>›</button>
+              <button class="btn btn-secondary btn-sm" id="btn-lyrics-speed" type="button" aria-pressed="false">1× Speed</button>
+            </div>
+            <div class="lyrics-status">
+              <span class="lyrics-counter num" id="lyrics-counter">Tap Play or any sentence</span>
+              <span class="voice-badge" id="lyrics-voice-badge" hidden>Natural Voice</span>
+            </div>
+          </div>
+
           <div class="sentence-list" id="reading-sentences"></div>
         </div>
       </section>
@@ -315,8 +335,8 @@
               <input id="prof-native-name" type="text" placeholder="Norwegian" required>
             </label>
             <label class="field field-full">
-              <span>TTS Voice Name</span>
-              <input id="prof-tts-voice" type="text" placeholder="pt-PT-Wavenet-A" required>
+              <span>Voice Name (Natural Gemini voices: Sulafat, Kore, Aoede, Leda, Puck)</span>
+              <input id="prof-tts-voice" type="text" placeholder="Sulafat" required>
             </label>
             <label class="field field-full">
               <span>Dialect &amp; Tutoring Rules</span>

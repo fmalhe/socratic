@@ -16,7 +16,9 @@
     }
   ],
   "vars": {
-    "GEMINI_MODEL": "gemini-4-hydrogen"
+    "GEMINI_MODEL": "gemini-4-hydrogen",
+    "GEMINI_TTS_MODEL": "gemini-3.8-flash-lite-tts",
+    "GEMINI_TTS_VOICE": "Sulafat"
   },
   "observability": {
     "enabled": true
