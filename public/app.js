@@ -61,6 +61,30 @@ function showToast(message) {
   }, 3600);
 }
 
+function launchStarCelebration() {
+  const layer = $('confetti-layer');
+  if (!layer) return;
+  const emojis = ['⭐', '🌟', '✨', '🎉', '💫'];
+  for (let i = 0; i < 18; i += 1) {
+    const node = document.createElement('span');
+    node.className = 'confetti-star';
+    node.textContent = emojis[i % emojis.length];
+    const startX = 25 + Math.random() * 50;
+    const startY = 45 + Math.random() * 20;
+    const dx = (Math.random() - 0.5) * 260;
+    const dy = -120 - Math.random() * 220;
+    const rot = `${Math.round((Math.random() - 0.5) * 320)}deg`;
+    node.style.left = `${startX}vw`;
+    node.style.top = `${startY}vh`;
+    node.style.setProperty('--dx', `${Math.round(dx)}px`);
+    node.style.setProperty('--dy', `${Math.round(dy)}px`);
+    node.style.setProperty('--rot', rot);
+    node.style.animationDelay = `${Math.round(Math.random() * 140)}ms`;
+    layer.appendChild(node);
+    setTimeout(() => node.remove(), 1400);
+  }
+}
+
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '';
   if (bytes < 1024) return `${bytes} B`;
@@ -527,7 +551,7 @@ function createLyricsPlayer() {
       playLabel.textContent = 'Play';
     }
 
-    speedBtn.textContent = slow ? '0.75× Slow' : '1× Speed';
+    speedBtn.textContent = slow ? '🐢 Slow' : '🐢';
     speedBtn.setAttribute('aria-pressed', String(slow));
 
     if (!hasLines) {
@@ -937,13 +961,14 @@ function renderReadingPage() {
     const btnListen = document.createElement('button');
     btnListen.type = 'button';
     btnListen.className = 'btn btn-secondary btn-sm';
-    btnListen.textContent = 'Play Here';
+    btnListen.textContent = '▶ Play';
     btnListen.addEventListener('click', () => lyricsPlayer.playFrom(idx, false));
 
     const btnSlow = document.createElement('button');
     btnSlow.type = 'button';
     btnSlow.className = 'btn btn-secondary btn-sm';
-    btnSlow.textContent = '0.75× Slow';
+    btnSlow.textContent = '🐢';
+    btnSlow.title = 'Slow';
     btnSlow.addEventListener('click', () => lyricsPlayer.playFrom(idx, true));
 
     audioRow.append(btnListen, btnSlow);
@@ -954,7 +979,7 @@ function renderReadingPage() {
       const pill = document.createElement('button');
       pill.type = 'button';
       pill.className = 'word-pill';
-      pill.textContent = w.word;
+      pill.textContent = `✨ ${w.word}`;
       pill.addEventListener('click', () => openWordDialog(w));
       wordsRow.appendChild(pill);
     });
@@ -986,7 +1011,8 @@ async function finishReadingPage() {
     }),
   });
   await loadProgress();
-  showToast('Awesome reading! +10 stars earned ★');
+  launchStarCelebration();
+  showToast('Awesome reading! +10 ⭐');
 }
 
 /* Homework Session Flow */
@@ -1252,8 +1278,10 @@ function renderHomeworkWorkspace() {
   const ex = session.exercises[state.activeExerciseIndex] || session.exercises[0];
   $('hw-ex-badge').textContent = `Exercise ${ex.label}`;
   const statusEl = $('hw-ex-status');
-  statusEl.textContent = ex.status;
-  statusEl.classList.toggle('is-completed', ex.status === 'COMPLETED');
+  const isDone = ex.status === 'COMPLETED';
+  statusEl.hidden = !isDone;
+  statusEl.textContent = '⭐ Done!';
+  statusEl.classList.toggle('is-completed', isDone);
   $('hw-ex-target').textContent = ex.promptTarget;
   renderHomeworkExplanation();
 
@@ -1263,59 +1291,21 @@ function renderHomeworkWorkspace() {
     const pill = document.createElement('button');
     pill.type = 'button';
     pill.className = 'word-pill';
-    pill.textContent = w.word;
+    pill.textContent = `✨ ${w.word}`;
     pill.addEventListener('click', () => openWordDialog(w));
     wordsRow.appendChild(pill);
   });
 
   const completeBtn = $('btn-hw-complete');
-  completeBtn.disabled = ex.status === 'COMPLETED';
-  completeBtn.textContent = ex.status === 'COMPLETED' ? 'Done ✓' : 'Done ✓';
-}
-
-async function submitHomeworkReply(event) {
-  event.preventDefault();
-  const input = $('hw-reply-input');
-  const message = input.value.trim();
-  if (!message || !state.activeSession) return;
-
-  const session = state.activeSession;
-  const ex = session.exercises[state.activeExerciseIndex];
-  const sendBtn = $('btn-hw-send');
-  sendBtn.disabled = true;
-
-  try {
-    const reply = await apiJson(
-      `/api/homework/sessions/${session.id}/exercises/${ex.id}/reply`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      },
-    );
-    input.value = '';
-    const updatedSession = await apiJson(`/api/homework/sessions/${session.id}`);
-    state.activeSession = updatedSession;
-    state.homeworkSessions = state.homeworkSessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
-    renderHomeworkWorkspace();
-    if (reply.followUpQuestionNative) {
-      const bubble = document.createElement('div');
-      bubble.className = 'msg-bubble msg-tutor';
-      bubble.textContent = reply.followUpQuestionNative;
-      $('hw-messages').appendChild(bubble);
-      $('hw-messages').scrollTop = $('hw-messages').scrollHeight;
-    }
-  } catch (err) {
-    showToast(`Could not send reply: ${err.message}`);
-  } finally {
-    sendBtn.disabled = false;
-  }
+  completeBtn.disabled = isDone;
+  completeBtn.textContent = isDone ? '⭐ Done!' : '🎉 Done!';
 }
 
 async function completeActiveExercise() {
   const session = state.activeSession;
   if (!session) return;
   const ex = session.exercises[state.activeExerciseIndex];
+  if (!ex) return;
   try {
     await apiJson(`/api/homework/sessions/${session.id}/exercises/${ex.id}/complete`, { method: 'POST' });
     const updatedSession = await apiJson(`/api/homework/sessions/${session.id}`);
@@ -1333,13 +1323,14 @@ async function completeActiveExercise() {
       }),
     });
     await loadProgress();
+    launchStarCelebration();
 
     const nextPending = updatedSession.exercises.findIndex((item) => item.status !== 'COMPLETED');
     if (nextPending >= 0) {
       state.activeExerciseIndex = nextPending;
-      showToast('Exercise done! +5 ★ — Moving to the next one!');
+      showToast('Awesome! +5 ⭐ — Next exercise!');
     } else {
-      showToast('You finished the whole homework page! 🎉 +5 ★');
+      showToast('Whole page finished! 🎉 +5 ⭐');
     }
     renderSessionChips();
     renderHomeworkWorkspace();
