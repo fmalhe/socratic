@@ -9,14 +9,15 @@ Everything runs on Cloudflare's **Free Plan** — no credit card required, no Do
 ## 2. Create Your Free D1 Database
 1. In the Cloudflare Dashboard, go to **Storage & Databases → D1 SQL Database → Create**.
 2. Name it `socratic-db` and click **Create**.
-3. Copy the **Database ID** and paste it into `wrangler.jsonc` (`database_id`).
+3. Copy the **Database ID** (you'll add it as a GitHub Secret in Step 3 — no need to commit it to `wrangler.jsonc`).
 
-## 3. Create a Cloudflare API Token for GitHub Actions
+## 3. Create a Cloudflare API Token & Add GitHub Secrets
 1. Go to **My Profile → API Tokens → Create Token**.
 2. Use the **Edit Cloudflare Workers** template and also add **Account → D1: Edit**.
 3. In **GitHub → `fmalhe/socratic` → Settings → Secrets and variables → Actions → Secrets**, add:
    - `CLOUDFLARE_API_TOKEN`
    - `CLOUDFLARE_ACCOUNT_ID`
+   - `D1_DATABASE_ID` (from Step 2)
 4. *(Optional)* Add Actions **Variable** `CLOUDFLARE_DEPLOY_ENABLED=true` to auto-deploy on every push to `main`.
 
 ## 4. Deploy & Add Runtime Secrets

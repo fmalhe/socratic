@@ -28,6 +28,21 @@ jobs:
           npm run typecheck
           npm test
 
+      - name: Inject D1 database ID from GitHub Secret
+        env:
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+        run: |
+          if [ -z "$D1_DATABASE_ID" ]; then
+            echo "Error: D1_DATABASE_ID secret is not set" >&2
+            exit 1
+          fi
+          node -e '
+            const fs = require("fs");
+            const content = fs.readFileSync("wrangler.jsonc", "utf8");
+            const updated = content.replace("REPLACE_WITH_YOUR_D1_DATABASE_ID", process.env.D1_DATABASE_ID);
+            fs.writeFileSync("wrangler.jsonc", updated);
+          '
+
       - name: Apply D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
