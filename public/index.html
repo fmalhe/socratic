@@ -259,18 +259,12 @@
         </div>
 
         <div class="homework-workspace" id="homework-workspace" hidden>
-          <div class="surface overview-surface">
-            <div class="overview-top">
-              <div class="overview-copy">
-                <div class="eyebrow">Page Overview</div>
-                <p class="overview-text" id="hw-page-summary"></p>
-              </div>
-              <button class="photo-thumb-btn" id="btn-hw-photo" type="button" hidden aria-label="View scanned worksheet photo">
-                <img id="hw-photo-thumb" alt="Scanned worksheet">
-                <span>View Photo</span>
-              </button>
-            </div>
+          <div class="homework-toolbar">
             <div class="exercise-stepper" id="hw-exercise-stepper" role="tablist" aria-label="Exercises"></div>
+            <button class="photo-thumb-btn" id="btn-hw-photo" type="button" hidden aria-label="View scanned worksheet photo">
+              <img id="hw-photo-thumb" alt="Scanned worksheet">
+              <span>Photo</span>
+            </button>
           </div>
 
           <article class="surface exercise-surface" id="hw-active-exercise">
@@ -282,34 +276,43 @@
             <div class="exercise-prompt">
               <p class="reading-text" id="hw-ex-target"></p>
               <div class="audio-row">
-                <button class="btn btn-secondary btn-sm" id="btn-hw-listen" type="button">Listen</button>
+                <button class="btn btn-primary btn-sm" id="btn-hw-listen" type="button">
+                  <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                  <span>Listen</span>
+                </button>
                 <button class="btn btn-secondary btn-sm" id="btn-hw-slow" type="button">0.75× Slow</button>
               </div>
             </div>
 
             <div class="tricky-words-row" id="hw-ex-words"></div>
 
-            <div class="explanation-row">
-              <div class="explanation-bar">
-                <div class="flag-toggle" role="group" aria-label="Explanation language">
-                  <button class="flag-btn is-active" id="btn-exp-native" type="button" aria-pressed="true" title="Native language explanation">
-                    <span class="flag-emoji" id="flag-exp-native">🇳🇴</span>
-                  </button>
-                  <button class="flag-btn" id="btn-exp-target" type="button" aria-pressed="false" title="Target language explanation">
-                    <span class="flag-emoji" id="flag-exp-target">🇵🇹</span>
-                  </button>
-                </div>
-                <div class="explanation-audio">
-                  <button class="btn btn-secondary btn-sm" id="btn-exp-listen" type="button" aria-label="Listen to explanation">
-                    <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-                    </svg>
-                    <span>Listen</span>
-                  </button>
-                  <button class="btn btn-ghost btn-sm" id="btn-exp-slow" type="button" aria-label="Listen slowly">0.75×</button>
-                </div>
+            <div class="audio-hint-strip" id="hw-audio-hints">
+              <span class="audio-hint-label">Need help? Tap to listen:</span>
+              <div class="audio-hint-buttons">
+                <button class="hint-flag-btn" id="btn-exp-native" type="button">
+                  <span class="flag-emoji" id="flag-exp-native">🇳🇴</span>
+                  <span id="label-exp-native">Norsk</span>
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                </button>
+                <button class="hint-flag-btn" id="btn-exp-english" type="button" hidden>
+                  <span class="flag-emoji">🇬🇧</span>
+                  <span>English</span>
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                </button>
+                <button class="hint-flag-btn" id="btn-exp-target" type="button" hidden>
+                  <span class="flag-emoji" id="flag-exp-target">🇵🇹</span>
+                  <span id="label-exp-target">Português</span>
+                  <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                </button>
               </div>
-              <p id="hw-ex-explanation"></p>
             </div>
 
             <div class="pingpong-area">

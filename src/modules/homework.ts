@@ -38,6 +38,7 @@ interface ExerciseRow {
   prompt_target: string;
   explanation_native: string;
   explanation_target: string | null;
+  explanation_english: string | null;
   tricky_words_json: string;
   opening_question_native: string;
   status: ExerciseStatus;
@@ -60,6 +61,7 @@ interface ScannedHomeworkPage {
     promptTarget: string;
     explanationNative: string;
     explanationTarget: string;
+    explanationEnglish: string;
     trickyWords: WordHint[];
     openingQuestionNative: string;
   }>;
@@ -95,6 +97,7 @@ const HOMEWORK_SCAN_SCHEMA = {
           promptTarget: { type: "STRING" },
           explanationNative: { type: "STRING" },
           explanationTarget: { type: "STRING" },
+          explanationEnglish: { type: "STRING" },
           trickyWords: {
             type: "ARRAY",
             items: {
@@ -114,6 +117,7 @@ const HOMEWORK_SCAN_SCHEMA = {
           "promptTarget",
           "explanationNative",
           "explanationTarget",
+          "explanationEnglish",
           "trickyWords",
           "openingQuestionNative",
         ],
@@ -166,6 +170,7 @@ async function loadExercises(db: D1Database, sessionId: number): Promise<Homewor
       promptTarget: row.prompt_target,
       explanationNative: row.explanation_native,
       explanationTarget: row.explanation_target ?? null,
+      explanationEnglish: row.explanation_english ?? null,
       trickyWords: JSON.parse(row.tricky_words_json) as WordHint[],
       openingQuestionNative: row.opening_question_native,
       status: row.status,
@@ -279,8 +284,8 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
   const exerciseStatements = scanned.exercises.map((ex, idx) =>
     c.env.DB.prepare(
       `INSERT INTO homework_exercise
-         (session_id, position, label, prompt_target, explanation_native, explanation_target, tricky_words_json, opening_question_native, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
+         (session_id, position, label, prompt_target, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
     ).bind(
       sessionId,
       idx + 1,
@@ -288,6 +293,7 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
       ex.promptTarget,
       ex.explanationNative,
       ex.explanationTarget ?? null,
+      ex.explanationEnglish ?? null,
       JSON.stringify(ex.trickyWords ?? []),
       ex.openingQuestionNative,
     ),

@@ -50,8 +50,9 @@ Keep explanations SHORT and simple (1 to 2 brief sentences max) so a ${profile.a
 - \`exercises\`: Each exercise on the page in order:
   - \`label\`: Exercise number or label (e.g., "1", "2a").
   - \`promptTarget\`: The exercise question/instruction in ${profile.targetLanguageName} so the child can read it aloud.
-  - \`explanationNative\`: A short, super clear 1–2 sentence explanation in ${profile.nativeLanguageName} of what to do. NEVER give away the final answer.
-  - \`explanationTarget\`: The same short, kid-friendly 1–2 sentence explanation in simple ${profile.targetLanguageName}. NEVER give away the final answer.
+  - \`explanationNative\`: A short, super clear 1–2 sentence spoken explanation in ${profile.nativeLanguageName} of what to do. NEVER give away the final answer.
+  - \`explanationTarget\`: The same short, kid-friendly 1–2 sentence spoken explanation in simple ${profile.targetLanguageName}. NEVER give away the final answer.
+  - \`explanationEnglish\`: The same short, kid-friendly 1–2 sentence spoken explanation in simple English. NEVER give away the final answer.
   - \`trickyWords\`: 1 to 4 harder ${profile.targetLanguageName} words from this exercise, each with \`word\`, hyphenated \`syllables\`, and a short \`nativeHint\` in ${profile.nativeLanguageName}.
   - \`openingQuestionNative\`: One short, gentle first question in ${profile.nativeLanguageName} to start ping-ponging together on this exercise.`;
 }

@@ -66,6 +66,7 @@ export interface HomeworkExerciseDto {
   promptTarget: string;
   explanationNative: string;
   explanationTarget?: string | null;
+  explanationEnglish?: string | null;
   trickyWords: WordHint[];
   openingQuestionNative: string;
   status: ExerciseStatus;
