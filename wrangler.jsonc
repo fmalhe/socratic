@@ -16,7 +16,7 @@
     }
   ],
   "vars": {
-    "GEMINI_MODEL": "gemini-2.5-flash"
+    "GEMINI_MODEL": "gemini-4-hydrogen"
   },
   "observability": {
     "enabled": true

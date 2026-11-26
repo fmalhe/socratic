@@ -115,7 +115,7 @@ export async function callGeminiStructured<T>(
   if (!env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not configured");
   }
-  const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = env.GEMINI_MODEL || "gemini-4-hydrogen";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
 
   const parts: Array<Record<string, unknown>> = [{ text: params.userText }];
