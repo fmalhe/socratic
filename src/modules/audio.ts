@@ -212,19 +212,41 @@ async function synthesizeWithGoogleCloudTts(
   return { bytes: decodeBase64(body.audioContent), contentType: "audio/mpeg" };
 }
 
-export const audioRoutes = new Hono<{ Bindings: Env }>();
+const AUDIO_ACCEPT_QUERY = '"application/json"';
 
-audioRoutes.post("/speak", async (c) => {
+async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
+  if (c.req.method === "QUERY") {
+    const contentType = c.req.header("Content-Type")?.toLowerCase() ?? "";
+    if (!contentType) {
+      return c.json({ error: "Content-Type header is required for QUERY requests" }, 400, {
+        "Accept-Query": AUDIO_ACCEPT_QUERY,
+      });
+    }
+    if (!contentType.includes("application/json")) {
+      return c.json({ error: "Unsupported Media Type; expected application/json" }, 415, {
+        "Accept-Query": AUDIO_ACCEPT_QUERY,
+      });
+    }
+  }
+
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const parsed = speakSchema.safeParse(await c.req.json());
+  let rawBody: unknown;
+  try {
+    rawBody = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400, { "Accept-Query": AUDIO_ACCEPT_QUERY });
+  }
+
+  const parsed = speakSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return c.json({ error: parsed.error.flatten() }, 400);
+    return c.json({ error: parsed.error.flatten() }, 400, { "Accept-Query": AUDIO_ACCEPT_QUERY });
   }
 
   if (!c.env.GEMINI_API_KEY && !c.env.GOOGLE_TTS_API_KEY) {
     return c.json(
       { error: "No cloud TTS provider configured; use browser speechSynthesis fallback" },
       501,
+      { "Accept-Query": AUDIO_ACCEPT_QUERY },
     );
   }
 
@@ -239,6 +261,7 @@ audioRoutes.post("/speak", async (c) => {
     parsed.data.slow ? "slow" : "normal",
     parsed.data.text,
   ]);
+  const contentLocation = `/api/uploads/${cacheKey}`;
 
   // 1. Serve instantly from R2 cache if available
   if (c.env.UPLOADS) {
@@ -248,6 +271,8 @@ audioRoutes.post("/speak", async (c) => {
       cached.writeHttpMetadata(headers);
       if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/wav");
       headers.set("Accept-Ranges", "bytes");
+      headers.set("Accept-Query", AUDIO_ACCEPT_QUERY);
+      headers.set("Content-Location", contentLocation);
       headers.set("X-Audio-Cache", "HIT");
       return new Response(cached.body, { status: 200, headers });
     }
@@ -278,11 +303,22 @@ audioRoutes.post("/speak", async (c) => {
     return c.json(
       { error: "Cloud TTS unavailable; falling back to device speechSynthesis" },
       501,
+      { "Accept-Query": AUDIO_ACCEPT_QUERY },
     );
   }
 
-  // 4. Cache in R2 so replays are instant and free
+  const responseHeaders: Record<string, string> = {
+    "Content-Type": audio.contentType,
+    "Content-Length": String(audio.bytes.byteLength),
+    "Accept-Ranges": "bytes",
+    "Accept-Query": AUDIO_ACCEPT_QUERY,
+    "X-Audio-Provider": provider,
+    "X-Audio-Cache": "MISS",
+  };
+
+  // 4. Cache in R2 so replays are instant and addressable via Content-Location
   if (c.env.UPLOADS) {
+    responseHeaders["Content-Location"] = contentLocation;
     const putPromise = c.env.UPLOADS.put(cacheKey, audio.bytes, {
       httpMetadata: {
         contentType: audio.contentType,
@@ -298,12 +334,17 @@ audioRoutes.post("/speak", async (c) => {
 
   return new Response(audio.bytes, {
     status: 200,
-    headers: {
-      "Content-Type": audio.contentType,
-      "Content-Length": String(audio.bytes.byteLength),
-      "Accept-Ranges": "bytes",
-      "X-Audio-Provider": provider,
-      "X-Audio-Cache": "MISS",
-    },
+    headers: responseHeaders,
   });
-});
+}
+
+export const audioRoutes = new Hono<{ Bindings: Env }>();
+
+audioRoutes.on("OPTIONS", "/speak", (c) =>
+  c.body(null, 204, {
+    Allow: "QUERY, POST, OPTIONS",
+    "Accept-Query": AUDIO_ACCEPT_QUERY,
+  }),
+);
+audioRoutes.on("QUERY", "/speak", handleSpeak);
+audioRoutes.post("/speak", handleSpeak);

@@ -25,7 +25,21 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.use("/api/*", cors());
+const apiCors = cors({
+  origin: "*",
+  allowMethods: ["GET", "POST", "PUT", "DELETE", "QUERY", "OPTIONS", "HEAD"],
+  allowHeaders: ["Content-Type", "X-Profile-Id"],
+  exposeHeaders: ["Accept-Query", "Content-Location", "X-Audio-Provider", "X-Audio-Cache"],
+});
+
+app.use("/api/*", async (c, next) => {
+  // Let direct RFC 10008 OPTIONS discovery requests reach route handlers unless it's a CORS preflight
+  if (c.req.method === "OPTIONS" && !c.req.header("Access-Control-Request-Method")) {
+    await next();
+    return;
+  }
+  return apiCors(c, next);
+});
 
 app.get("/api/health", (c) => c.json({ status: "UP", r2Enabled: Boolean(c.env.UPLOADS) }));
 

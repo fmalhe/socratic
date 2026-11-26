@@ -289,10 +289,88 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
   return c.json(session);
 });
 
+const SESSIONS_ACCEPT_QUERY = '"application/json", "text/plain"';
+
+const sessionQuerySchema = z.object({
+  q: z.string().trim().optional().default(""),
+  status: z.enum(["PENDING", "IN_PROGRESS", "COMPLETED"]).optional(),
+  limit: z.number().int().min(1).max(50).optional().default(20),
+});
+
+function matchesHomeworkQuery(session: HomeworkSessionResponse, needle: string, status?: ExerciseStatus): boolean {
+  if (status && !session.exercises.some((ex) => ex.status === status)) {
+    return false;
+  }
+  if (!needle) return true;
+  const haystacks = [
+    session.pageSummaryNative,
+    session.pageTextTarget,
+    ...session.exercises.flatMap((ex) => [
+      ex.label,
+      ex.promptTarget,
+      ex.explanationNative,
+      ...(ex.trickyWords ?? []).flatMap((w) => [w.word, w.nativeHint]),
+    ]),
+  ];
+  return haystacks.some((text) => text && text.toLowerCase().includes(needle));
+}
+
+homeworkRoutes.on("OPTIONS", "/sessions", (c) =>
+  c.body(null, 204, {
+    Allow: "GET, QUERY, OPTIONS",
+    "Accept-Query": SESSIONS_ACCEPT_QUERY,
+  }),
+);
+
 homeworkRoutes.get("/sessions", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   const profile = await getActiveProfile(c.env.DB, profileId);
-  return c.json(await listHomeworkSessions(c.env.DB, profile.id));
+  return c.json(await listHomeworkSessions(c.env.DB, profile.id), 200, {
+    "Accept-Query": SESSIONS_ACCEPT_QUERY,
+  });
+});
+
+homeworkRoutes.on("QUERY", "/sessions", async (c) => {
+  const contentType = c.req.header("Content-Type")?.toLowerCase() ?? "";
+  if (!contentType) {
+    return c.json({ error: "Content-Type header is required for QUERY requests" }, 400, {
+      "Accept-Query": SESSIONS_ACCEPT_QUERY,
+    });
+  }
+
+  let queryInput: { q: string; status?: ExerciseStatus; limit: number };
+  if (contentType.includes("application/json")) {
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON query body" }, 400, { "Accept-Query": SESSIONS_ACCEPT_QUERY });
+    }
+    const parsed = sessionQuerySchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.flatten() }, 422, { "Accept-Query": SESSIONS_ACCEPT_QUERY });
+    }
+    queryInput = parsed.data;
+  } else if (contentType.includes("text/plain")) {
+    const text = (await c.req.text()).trim();
+    queryInput = { q: text, limit: 20 };
+  } else {
+    return c.json({ error: "Unsupported Media Type; expected application/json or text/plain" }, 415, {
+      "Accept-Query": SESSIONS_ACCEPT_QUERY,
+    });
+  }
+
+  const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
+  const profile = await getActiveProfile(c.env.DB, profileId);
+  const allSessions = await listHomeworkSessions(c.env.DB, profile.id);
+  const needle = queryInput.q.toLowerCase();
+  const filtered = allSessions
+    .filter((session) => matchesHomeworkQuery(session, needle, queryInput.status))
+    .slice(0, queryInput.limit);
+
+  return c.json(filtered, 200, {
+    "Accept-Query": SESSIONS_ACCEPT_QUERY,
+  });
 });
 
 homeworkRoutes.get("/sessions/:sessionId", async (c) => {

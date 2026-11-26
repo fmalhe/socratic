@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types";
 
-const ALLOWED_FOLDERS = new Set(["reading", "homework"]);
+const ALLOWED_FOLDERS = new Set(["reading", "homework", "audio"]);
 const SAFE_FILENAME = /^[a-zA-Z0-9._-]+$/;
 
 function extensionForMime(mimeType: string): string {

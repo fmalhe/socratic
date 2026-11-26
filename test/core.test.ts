@@ -153,4 +153,51 @@ describe("Worker HTTP routes", () => {
     expect(okRes.status).toBe(200);
     expect(okRes.headers.get("Content-Type")).toBe("image/jpeg");
   });
+
+  it("supports RFC 10008 HTTP QUERY and Accept-Query discovery on /api/audio/speak and /api/homework/sessions", async () => {
+    const optAudio = await app.request("/api/audio/speak", { method: "OPTIONS" }, makeEnv());
+    expect(optAudio.status).toBe(204);
+    expect(optAudio.headers.get("Allow")).toContain("QUERY");
+    expect(optAudio.headers.get("Accept-Query")).toContain("application/json");
+
+    const badMediaAudio = await app.request(
+      "/api/audio/speak",
+      {
+        method: "QUERY",
+        headers: { "Content-Type": "text/plain" },
+        body: "Bom dia",
+      },
+      makeEnv({ GEMINI_API_KEY: "" }),
+    );
+    expect(badMediaAudio.status).toBe(415);
+    expect(badMediaAudio.headers.get("Accept-Query")).toContain("application/json");
+
+    const validQueryAudio = await app.request(
+      "/api/audio/speak",
+      {
+        method: "QUERY",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Bom dia!", slow: false }),
+      },
+      makeEnv({ GEMINI_API_KEY: "" }),
+    );
+    expect(validQueryAudio.status).toBe(501);
+    expect(validQueryAudio.headers.get("Accept-Query")).toContain("application/json");
+
+    const optSessions = await app.request("/api/homework/sessions", { method: "OPTIONS" }, makeEnv());
+    expect(optSessions.status).toBe(204);
+    expect(optSessions.headers.get("Allow")).toContain("QUERY");
+    expect(optSessions.headers.get("Accept-Query")).toContain("text/plain");
+
+    const badMediaSessions = await app.request(
+      "/api/homework/sessions",
+      {
+        method: "QUERY",
+        headers: { "Content-Type": "application/xml" },
+        body: "<q/>",
+      },
+      makeEnv(),
+    );
+    expect(badMediaSessions.status).toBe(415);
+  });
 });

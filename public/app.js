@@ -278,19 +278,29 @@ async function fetchTtsAudio(text, slow = false) {
     return ttsAudioCache.get(key);
   }
   const promise = (async () => {
+    const payload = JSON.stringify({ text, languageCode: langCode, slow });
+    const headers = { 'Content-Type': 'application/json' };
     try {
-      const res = await fetch('/api/audio/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, languageCode: langCode, slow }),
-      });
+      let res = await fetch('/api/audio/speak', { method: 'QUERY', headers, body: payload });
+      if (res.status === 405) {
+        res = await fetch('/api/audio/speak', { method: 'POST', headers, body: payload });
+      }
       if (!res.ok) return null;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const provider = res.headers.get('X-Audio-Provider') || 'cloud';
       return { url, provider };
     } catch {
-      return null;
+      try {
+        const res = await fetch('/api/audio/speak', { method: 'POST', headers, body: payload });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const provider = res.headers.get('X-Audio-Provider') || 'cloud';
+        return { url, provider };
+      } catch {
+        return null;
+      }
     }
   })();
   ttsAudioCache.set(key, promise);
@@ -942,6 +952,7 @@ async function finishReadingPage() {
 }
 
 /* Homework Session Flow */
+let hwSearchQuery = '';
 async function loadHomeworkSessions() {
   try {
     state.homeworkSessions = await apiJson('/api/homework/sessions');
@@ -954,15 +965,37 @@ async function loadHomeworkSessions() {
   }
 }
 
+async function queryHomeworkSessions(q) {
+  hwSearchQuery = (q || '').trim();
+  if (!hwSearchQuery) {
+    await loadHomeworkSessions();
+    return;
+  }
+  try {
+    state.homeworkSessions = await apiJson('/api/homework/sessions', {
+      method: 'QUERY',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: hwSearchQuery, limit: 20 }),
+    });
+    renderSessionChips();
+  } catch (err) {
+    showToast(`Search failed: ${err.message}`);
+  }
+}
+
 function renderSessionChips() {
   const container = $('homework-recent-sessions');
   const chips = $('session-chips');
-  if (!state.homeworkSessions.length) {
+  if (!state.homeworkSessions.length && !hwSearchQuery) {
     container.hidden = true;
     return;
   }
   container.hidden = false;
   chips.innerHTML = '';
+  if (!state.homeworkSessions.length && hwSearchQuery) {
+    chips.innerHTML = '<span class="muted-note">No matching pages found.</span>';
+    return;
+  }
   state.homeworkSessions.forEach((session) => {
     const done = session.exercises.filter((e) => e.status === 'COMPLETED').length;
     const btn = document.createElement('button');
@@ -1232,6 +1265,12 @@ function init() {
 
   $('homework-camera-input').addEventListener('change', onFileSelected(handleHomeworkScan));
   $('homework-library-input').addEventListener('change', onFileSelected(handleHomeworkScan));
+  let hwSearchTimer = null;
+  $('hw-search-input').addEventListener('input', (e) => {
+    clearTimeout(hwSearchTimer);
+    const val = e.target.value;
+    hwSearchTimer = setTimeout(() => queryHomeworkSessions(val), 250);
+  });
   $('btn-hw-photo').addEventListener('click', () => {
     const session = state.activeSession;
     const url = session?.imageUrl || (session ? state.localSessionPhotos.get(session.id) : null);
