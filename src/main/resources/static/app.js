@@ -78,7 +78,7 @@ async function speakText(text, slow = false) {
 
 /* Navigation */
 function switchTab(tabName) {
-  document.querySelectorAll('.tab-btn').forEach((btn) => {
+  document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.tab === tabName);
   });
   document.querySelectorAll('.view').forEach((view) => {
@@ -97,7 +97,7 @@ function switchTab(tabName) {
 async function loadProfile() {
   state.profile = await apiJson('/api/profile');
   const p = state.profile;
-  $('learner-subtitle').textContent = `${p.name} (${p.age}) · ${p.targetLanguageName} → ${p.nativeLanguageName}`;
+  $('learner-subtitle').textContent = `${p.name} · ${p.targetLanguageName} → ${p.nativeLanguageName}`;
   $('prof-name').value = p.name;
   $('prof-age').value = p.age;
   $('prof-target-code').value = p.targetLanguageCode;
@@ -120,14 +120,14 @@ async function loadProgress() {
   const shelf = $('saved-words-shelf');
   shelf.innerHTML = '';
   if (!pr.recentWords || pr.recentWords.length === 0) {
-    shelf.innerHTML = '<p class="muted-note">No saved tricky words yet — scan a page to start collecting!</p>';
+    shelf.innerHTML = '<p class="muted-note">No saved tricky words yet — scan a page to start collecting.</p>';
     return;
   }
   pr.recentWords.forEach((item) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'word-pill';
-    btn.textContent = `🔊 ${item.word}`;
+    btn.textContent = item.word;
     btn.addEventListener('click', () => speakText(item.word, true));
     shelf.appendChild(btn);
   });
@@ -183,14 +183,14 @@ function renderReadingPage() {
 
     const btnListen = document.createElement('button');
     btnListen.type = 'button';
-    btnListen.className = 'btn btn-secondary';
-    btnListen.textContent = '🔊 Listen';
+    btnListen.className = 'btn btn-secondary btn-sm';
+    btnListen.textContent = 'Listen';
     btnListen.addEventListener('click', () => speakText(sentence.targetText, false));
 
     const btnSlow = document.createElement('button');
     btnSlow.type = 'button';
-    btnSlow.className = 'btn btn-secondary';
-    btnSlow.textContent = '🐢 Slow';
+    btnSlow.className = 'btn btn-secondary btn-sm';
+    btnSlow.textContent = '0.75× Slow';
     btnSlow.addEventListener('click', () => speakText(sentence.targetText, true));
 
     audioRow.append(btnListen, btnSlow);
@@ -348,7 +348,7 @@ function renderHomeworkWorkspace() {
       const phraseBtn = document.createElement('button');
       phraseBtn.type = 'button';
       phraseBtn.className = 'msg-phrase-btn';
-      phraseBtn.textContent = `🔊 ${m.targetPhrase}`;
+      phraseBtn.textContent = m.targetPhrase;
       phraseBtn.addEventListener('click', () => speakText(m.targetPhrase, true));
       bubble.appendChild(document.createElement('br'));
       bubble.appendChild(phraseBtn);
@@ -359,7 +359,7 @@ function renderHomeworkWorkspace() {
 
   const completeBtn = $('btn-hw-complete');
   completeBtn.disabled = ex.status === 'COMPLETED';
-  completeBtn.textContent = ex.status === 'COMPLETED' ? '✓ Completed' : '✓ Done with This Exercise';
+  completeBtn.textContent = ex.status === 'COMPLETED' ? 'Completed' : 'Mark Exercise Done';
 }
 
 async function submitHomeworkReply(event) {
@@ -464,7 +464,7 @@ async function saveProfile(event) {
 
 /* Wire Events */
 function init() {
-  document.querySelectorAll('.tab-btn').forEach((btn) => {
+  document.querySelectorAll('.seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
   document.querySelectorAll('[data-nav]').forEach((btn) => {

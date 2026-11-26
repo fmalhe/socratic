@@ -3,58 +3,76 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="Socratic — Kid-friendly multilingual reading and homework tutor for iPad.">
+  <meta name="description" content="Socratic — Calm, focused multilingual reading and homework tutor for iPad.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Socratic">
-  <meta name="theme-color" content="#FAF7F2">
-  <title>Socratic — Reading &amp; Homework Tutor</title>
+  <meta name="theme-color" content="#F5F5F7">
+  <title>Socratic</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <header class="top-bar">
+  <header class="top-bar">
+    <div class="top-bar-inner">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">🦉</span>
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+          </svg>
+        </span>
         <div>
           <h1 class="brand-title">Socratic</h1>
-          <p class="brand-subtitle" id="learner-subtitle">Loading learner…</p>
+          <p class="brand-subtitle" id="learner-subtitle">Loading…</p>
         </div>
       </div>
 
       <div class="status-pills" aria-label="Progress summary">
         <button class="status-pill" id="pill-streak" type="button" data-nav="progress">
-          <span aria-hidden="true">🔥</span>
-          <span id="header-streak">0</span>
-          <span class="pill-label">days</span>
+          <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+          </svg>
+          <span class="num" id="header-streak">0</span>
+          <span class="pill-label">d</span>
         </button>
-        <button class="status-pill status-pill-gold" id="pill-stars" type="button" data-nav="progress">
-          <span aria-hidden="true">★</span>
-          <span id="header-stars">0</span>
-          <span class="pill-label">stars</span>
+        <button class="status-pill status-pill-star" id="pill-stars" type="button" data-nav="progress">
+          <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+          <span class="num" id="header-stars">0</span>
         </button>
       </div>
-    </header>
+    </div>
+  </header>
 
-    <nav class="tab-nav" aria-label="Main navigation">
-      <button class="tab-btn is-active" id="tab-reading" type="button" data-tab="reading">
-        <span class="tab-icon" aria-hidden="true">📖</span>
-        <span>Read a Page</span>
+  <div class="app-shell">
+    <nav class="segmented-nav" aria-label="Main navigation">
+      <button class="seg-btn is-active" id="tab-reading" type="button" data-tab="reading">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+        </svg>
+        <span>Read</span>
       </button>
-      <button class="tab-btn" id="tab-homework" type="button" data-tab="homework">
-        <span class="tab-icon" aria-hidden="true">✏️</span>
+      <button class="seg-btn" id="tab-homework" type="button" data-tab="homework">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+        </svg>
         <span>Homework</span>
       </button>
-      <button class="tab-btn" id="tab-progress" type="button" data-tab="progress">
-        <span class="tab-icon" aria-hidden="true">⭐</span>
-        <span>My Stars</span>
+      <button class="seg-btn" id="tab-progress" type="button" data-tab="progress">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+        <span>Progress</span>
       </button>
-      <button class="tab-btn" id="tab-profile" type="button" data-tab="profile">
-        <span class="tab-icon" aria-hidden="true">⚙️</span>
+      <button class="seg-btn" id="tab-profile" type="button" data-tab="profile">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
         <span>Settings</span>
       </button>
     </nav>
@@ -62,19 +80,25 @@
     <main class="main-content">
       <!-- READING VIEW -->
       <section class="view is-active" id="view-reading" aria-labelledby="reading-heading">
-        <div class="hero-card">
-          <div class="hero-copy">
-            <h2 id="reading-heading">Read a Book Page Together</h2>
-            <p>Snap a photo of a page. Tap any sentence to hear it, or tap tricky words to see syllables and hints.</p>
+        <div class="capture-surface">
+          <div class="capture-copy">
+            <h2 id="reading-heading">Read a page together</h2>
+            <p>Photograph a book page to listen sentence by sentence and tap tricky words for syllables and hints.</p>
           </div>
           <div class="capture-actions">
-            <label class="btn btn-primary btn-large" for="reading-camera-input" id="btn-reading-camera">
-              <span aria-hidden="true">📷</span> Take Photo of Page
+            <label class="btn btn-primary" for="reading-camera-input" id="btn-reading-camera">
+              <svg class="icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>
+              </svg>
+              <span>Take Photo</span>
             </label>
             <input id="reading-camera-input" type="file" accept="image/*" capture="environment" hidden>
 
-            <label class="btn btn-secondary btn-large" for="reading-library-input" id="btn-reading-library">
-              <span aria-hidden="true">🖼️</span> Choose Photo
+            <label class="btn btn-secondary" for="reading-library-input" id="btn-reading-library">
+              <svg class="icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+              </svg>
+              <span>Photo Library</span>
             </label>
             <input id="reading-library-input" type="file" accept="image/*" hidden>
           </div>
@@ -82,15 +106,15 @@
 
         <div class="loading-banner" id="reading-loading" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span>Reading your book page…</span>
+          <span>Analyzing page…</span>
         </div>
 
         <div id="reading-results" hidden>
           <div class="section-bar">
-            <h3>Sentences on This Page</h3>
+            <h3>Sentences</h3>
             <div class="section-actions">
-              <button class="btn btn-secondary" id="btn-read-all" type="button">🔊 Read Full Page</button>
-              <button class="btn btn-success" id="btn-finish-reading" type="button">✓ Finished Page (+10 ★)</button>
+              <button class="btn btn-secondary btn-sm" id="btn-read-all" type="button">Read Full Page</button>
+              <button class="btn btn-success btn-sm" id="btn-finish-reading" type="button">Finish Page · +10</button>
             </div>
           </div>
           <div class="sentence-list" id="reading-sentences"></div>
@@ -99,19 +123,25 @@
 
       <!-- HOMEWORK VIEW -->
       <section class="view" id="view-homework" aria-labelledby="homework-heading" hidden>
-        <div class="hero-card">
-          <div class="hero-copy">
-            <h2 id="homework-heading">Scan Homework &amp; Tackle One by One</h2>
-            <p>Take a photo of your worksheet. We will read each question together and figure it out step by step.</p>
+        <div class="capture-surface">
+          <div class="capture-copy">
+            <h2 id="homework-heading">Homework, one exercise at a time</h2>
+            <p>Scan a worksheet to break it into exercises, read questions together, and talk through each step.</p>
           </div>
           <div class="capture-actions">
-            <label class="btn btn-primary btn-large" for="homework-camera-input" id="btn-homework-camera">
-              <span aria-hidden="true">📷</span> Scan Homework Page
+            <label class="btn btn-primary" for="homework-camera-input" id="btn-homework-camera">
+              <svg class="icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>
+              </svg>
+              <span>Scan Page</span>
             </label>
             <input id="homework-camera-input" type="file" accept="image/*" capture="environment" hidden>
 
-            <label class="btn btn-secondary btn-large" for="homework-library-input" id="btn-homework-library">
-              <span aria-hidden="true">🖼️</span> Choose Photo
+            <label class="btn btn-secondary" for="homework-library-input" id="btn-homework-library">
+              <svg class="icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+              </svg>
+              <span>Photo Library</span>
             </label>
             <input id="homework-library-input" type="file" accept="image/*" hidden>
           </div>
@@ -119,48 +149,48 @@
 
         <div class="loading-banner" id="homework-loading" hidden>
           <span class="spinner" aria-hidden="true"></span>
-          <span>Understanding your homework page…</span>
+          <span>Extracting exercises…</span>
         </div>
 
         <div class="recent-sessions" id="homework-recent-sessions" hidden>
           <div class="section-bar">
-            <h3>Recent Homework Pages</h3>
+            <h3>Recent Pages</h3>
           </div>
           <div class="session-chips" id="session-chips"></div>
         </div>
 
         <div class="homework-workspace" id="homework-workspace" hidden>
-          <div class="page-summary-card">
-            <div class="page-summary-label">Page Overview</div>
-            <p id="hw-page-summary"></p>
+          <div class="surface overview-surface">
+            <div class="eyebrow">Page Overview</div>
+            <p class="overview-text" id="hw-page-summary"></p>
             <div class="exercise-stepper" id="hw-exercise-stepper" role="tablist" aria-label="Exercises"></div>
           </div>
 
-          <article class="exercise-card" id="hw-active-exercise">
+          <article class="surface exercise-surface" id="hw-active-exercise">
             <div class="exercise-header">
-              <span class="exercise-badge" id="hw-ex-badge">Exercise 1</span>
+              <span class="exercise-title" id="hw-ex-badge">Exercise 1</span>
               <span class="status-badge" id="hw-ex-status">PENDING</span>
             </div>
 
-            <div class="exercise-target-box">
+            <div class="exercise-prompt">
               <p class="reading-text" id="hw-ex-target"></p>
               <div class="audio-row">
-                <button class="btn btn-secondary" id="btn-hw-listen" type="button">🔊 Read Aloud</button>
-                <button class="btn btn-secondary" id="btn-hw-slow" type="button">🐢 Slow 0.75x</button>
+                <button class="btn btn-secondary btn-sm" id="btn-hw-listen" type="button">Listen</button>
+                <button class="btn btn-secondary btn-sm" id="btn-hw-slow" type="button">0.75× Slow</button>
               </div>
             </div>
 
             <div class="tricky-words-row" id="hw-ex-words"></div>
 
-            <div class="explanation-box">
-              <div class="explanation-label">What is this exercise asking?</div>
+            <div class="explanation-row">
+              <div class="eyebrow">Explanation</div>
               <p id="hw-ex-explanation"></p>
             </div>
 
             <div class="pingpong-area">
               <div class="pingpong-messages" id="hw-messages"></div>
               <form class="pingpong-form" id="hw-reply-form">
-                <label class="sr-only" for="hw-reply-input">Type your thought or question</label>
+                <label class="sr-only" for="hw-reply-input">Ask about a word or share your idea</label>
                 <input
                   id="hw-reply-input"
                   type="text"
@@ -168,14 +198,12 @@
                   autocomplete="off"
                   required
                 >
-                <button class="btn btn-primary" id="btn-hw-send" type="submit">Send</button>
+                <button class="btn btn-primary btn-sm" id="btn-hw-send" type="submit">Send</button>
               </form>
             </div>
 
             <div class="exercise-footer">
-              <button class="btn btn-success btn-large" id="btn-hw-complete" type="button">
-                ✓ Done with This Exercise
-              </button>
+              <button class="btn btn-success" id="btn-hw-complete" type="button">Mark Exercise Done</button>
             </div>
           </article>
         </div>
@@ -183,26 +211,26 @@
 
       <!-- PROGRESS VIEW -->
       <section class="view" id="view-progress" aria-labelledby="progress-heading" hidden>
-        <h2 class="view-title" id="progress-heading">My Stars &amp; Tricky Words</h2>
+        <h2 class="view-title" id="progress-heading">Progress</h2>
 
         <div class="stats-grid">
-          <div class="stat-card">
-            <span class="stat-value" id="stat-stars">0</span>
-            <span class="stat-label">Total Stars ★</span>
+          <div class="surface stat-card">
+            <span class="eyebrow">Stars</span>
+            <span class="stat-value num" id="stat-stars">0</span>
           </div>
-          <div class="stat-card">
-            <span class="stat-value" id="stat-streak">0</span>
-            <span class="stat-label">Day Streak 🔥</span>
+          <div class="surface stat-card">
+            <span class="eyebrow">Day Streak</span>
+            <span class="stat-value num" id="stat-streak">0</span>
           </div>
-          <div class="stat-card">
-            <span class="stat-value" id="stat-pages">0</span>
-            <span class="stat-label">Pages Read 📖</span>
+          <div class="surface stat-card">
+            <span class="eyebrow">Pages Read</span>
+            <span class="stat-value num" id="stat-pages">0</span>
           </div>
         </div>
 
-        <div class="surface-card">
+        <div class="surface section-surface">
           <div class="section-bar">
-            <h3>Tricky Words to Practice</h3>
+            <h3>Saved Tricky Words</h3>
             <span class="muted-note">Tap any word to hear it slowly</span>
           </div>
           <div class="word-shelf" id="saved-words-shelf"></div>
@@ -211,9 +239,9 @@
 
       <!-- PROFILE / SETTINGS VIEW -->
       <section class="view" id="view-profile" aria-labelledby="profile-heading" hidden>
-        <h2 class="view-title" id="profile-heading">Learner Settings (Parent)</h2>
+        <h2 class="view-title" id="profile-heading">Learner Settings</h2>
 
-        <form class="surface-card settings-form" id="profile-form">
+        <form class="surface section-surface" id="profile-form">
           <div class="form-grid">
             <label class="field">
               <span>Learner Name</span>
@@ -249,23 +277,23 @@
             </label>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary btn-large" id="btn-save-profile" type="submit">Save Settings</button>
+            <button class="btn btn-primary" id="btn-save-profile" type="submit">Save Changes</button>
           </div>
         </form>
       </section>
     </main>
   </div>
 
-  <!-- Word Hint Popover Modal -->
+  <!-- Word Hint Sheet Dialog -->
   <dialog class="word-dialog" id="word-dialog">
     <div class="word-dialog-body">
       <div class="word-dialog-syllables" id="dialog-syllables"></div>
       <div class="word-dialog-word" id="dialog-word"></div>
       <p class="word-dialog-hint" id="dialog-hint"></p>
       <div class="word-dialog-actions">
-        <button class="btn btn-primary" id="btn-dialog-slow" type="button">🐢 Listen Slowly</button>
-        <button class="btn btn-secondary" id="btn-dialog-normal" type="button">🔊 Normal</button>
-        <button class="btn btn-ghost" id="btn-dialog-close" type="button">Close</button>
+        <button class="btn btn-primary btn-sm" id="btn-dialog-slow" type="button">0.75× Slow</button>
+        <button class="btn btn-secondary btn-sm" id="btn-dialog-normal" type="button">Normal</button>
+        <button class="btn btn-ghost btn-sm" id="btn-dialog-close" type="button">Done</button>
       </div>
     </div>
   </dialog>
