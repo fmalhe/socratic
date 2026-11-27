@@ -1,1622 +1,1914 @@
-const state = {
-  profile: null,
-  progress: null,
-  readingPage: null,
-  readingPreviewUrl: null,
-  homeworkSessions: [],
-  activeSession: null,
-  activeExerciseIndex: 0,
-  explanationLang: 'native',
-  activeWord: null,
-  localSessionPhotos: new Map(),
-};
+(() => {
+  "use strict";
 
-const $ = (id) => document.getElementById(id);
+  const SILENT_WAV_URI =
+    "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 
-let cachedVoices = [];
-function refreshVoices() {
-  if (window.speechSynthesis && typeof window.speechSynthesis.getVoices === 'function') {
-    cachedVoices = window.speechSynthesis.getVoices() || [];
-  }
-}
-if (window.speechSynthesis) {
-  refreshVoices();
-  window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices);
-}
+  const OWL_SVG = `<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <circle cx="60" cy="64" r="50" fill="#FEF3C7" fill-opacity="0.65"/>
+    <path d="M27 38L39 20L49 35Z" fill="#2563EB"/>
+    <path d="M93 38L81 20L71 35Z" fill="#2563EB"/>
+    <ellipse cx="60" cy="66" rx="35" ry="37" fill="#3B82F6"/>
+    <ellipse cx="60" cy="80" rx="22" ry="20" fill="#FEF3C7"/>
+    <path d="M50 76Q54 80 58 76M62 76Q66 80 70 76M54 86Q60 91 66 86" stroke="#F59E0B" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="44" cy="52" r="13.5" fill="#FFFFFF"/>
+    <circle cx="76" cy="52" r="13.5" fill="#FFFFFF"/>
+    <circle cx="45" cy="53" r="6" fill="#1E2433"/>
+    <circle cx="75" cy="53" r="6" fill="#1E2433"/>
+    <circle cx="42.5" cy="50" r="2.2" fill="#FFFFFF"/>
+    <circle cx="72.5" cy="50" r="2.2" fill="#FFFFFF"/>
+    <path d="M53 58H67L60 69Z" fill="#F59E0B"/>
+  </svg>`;
 
-function pickBestVoice(langCode) {
-  if (!cachedVoices.length) refreshVoices();
-  if (!cachedVoices.length || !langCode) return null;
-  const target = langCode.toLowerCase();
-  const base = target.split('-')[0];
-  const candidates = cachedVoices.filter((v) => {
-    const lang = (v.lang || '').toLowerCase();
-    return lang === target || lang.startsWith(`${base}-`) || lang === base;
-  });
-  if (!candidates.length) return null;
-
-  const scoreVoice = (v) => {
-    let score = 0;
-    const lang = (v.lang || '').toLowerCase();
-    const name = (v.name || '').toLowerCase();
-    if (lang === target) score += 40;
-    if (/natural|neural|wavenet|chirp|enhanced|premium|siri/i.test(name)) score += 35;
-    if (/google|microsoft|joana|catarina|inês|ines/i.test(name)) score += 18;
-    if (!v.localService) score += 8; // Network/cloud voices on Android/Chrome are much less robotic
-    return score;
+  const FLAG_SVGS = {
+    pt: `<svg class="flag-svg" viewBox="0 0 28 20" aria-hidden="true">
+      <rect width="28" height="20" rx="3" fill="#DA291C"/>
+      <rect width="11" height="20" rx="3" fill="#046A38"/>
+      <circle cx="11" cy="10" r="4.3" fill="#FFE900"/>
+      <rect x="9.1" y="7.8" width="3.8" height="4.4" rx="1.2" fill="#FFFFFF" stroke="#DA291C" stroke-width="0.9"/>
+    </svg>`,
+    no: `<svg class="flag-svg" viewBox="0 0 28 20" aria-hidden="true">
+      <rect width="28" height="20" rx="3" fill="#BA0C2F"/>
+      <rect x="7" width="5" height="20" fill="#FFFFFF"/>
+      <rect y="7.5" width="28" height="5" fill="#FFFFFF"/>
+      <rect x="8.3" width="2.4" height="20" fill="#00205B"/>
+      <rect y="8.8" width="28" height="2.4" fill="#00205B"/>
+    </svg>`,
+    gb: `<svg class="flag-svg" viewBox="0 0 28 20" aria-hidden="true">
+      <rect width="28" height="20" rx="3" fill="#012169"/>
+      <path d="M0 0L28 20M28 0L0 20" stroke="#FFFFFF" stroke-width="3.6"/>
+      <path d="M0 0L28 20M28 0L0 20" stroke="#C8102E" stroke-width="1.8"/>
+      <rect x="11.2" width="5.6" height="20" fill="#FFFFFF"/>
+      <rect y="7.2" width="28" height="5.6" fill="#FFFFFF"/>
+      <rect x="12.4" width="3.2" height="20" fill="#C8102E"/>
+      <rect y="8.4" width="28" height="3.2" fill="#C8102E"/>
+    </svg>`,
   };
 
-  candidates.sort((a, b) => scoreVoice(b) - scoreVoice(a));
-  return candidates[0];
-}
+  const state = {
+    activeTab: "homework", // "homework" | "read"
+    profile: null,
+    progress: { totalStars: 0, currentStreakDays: 0, pagesReadCount: 0, savedWords: [] },
+    sessions: [],
+    currentSession: null,
+    hwSubView: "passage", // "passage" | "exercise"
+    hwExerciseIndex: 0,
+    passageActiveSentenceIdx: 0,
+    hwSlow: false,
+    readData: null,
+    readActiveSentenceIdx: 0,
+    readSlow: false,
+    isUploading: false,
+    activeUploadXhr: null,
+  };
 
-let toastTimer = null;
-function showToast(message) {
-  const el = $('toast');
-  el.textContent = message;
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    el.hidden = true;
-  }, 3600);
-}
+  const $ = (id) => document.getElementById(id);
 
-function launchStarCelebration() {
-  const layer = $('confetti-layer');
-  if (!layer) return;
-  const emojis = ['⭐', '🌟', '✨', '🎉', '💫'];
-  for (let i = 0; i < 18; i += 1) {
-    const node = document.createElement('span');
-    node.className = 'confetti-star';
-    node.textContent = emojis[i % emojis.length];
-    const startX = 25 + Math.random() * 50;
-    const startY = 45 + Math.random() * 20;
-    const dx = (Math.random() - 0.5) * 260;
-    const dy = -120 - Math.random() * 220;
-    const rot = `${Math.round((Math.random() - 0.5) * 320)}deg`;
-    node.style.left = `${startX}vw`;
-    node.style.top = `${startY}vh`;
-    node.style.setProperty('--dx', `${Math.round(dx)}px`);
-    node.style.setProperty('--dy', `${Math.round(dy)}px`);
-    node.style.setProperty('--rot', rot);
-    node.style.animationDelay = `${Math.round(Math.random() * 140)}ms`;
-    layer.appendChild(node);
-    setTimeout(() => node.remove(), 1400);
-  }
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-async function apiJson(url, options = {}) {
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json();
-}
-
-/* Client-side resize & JPEG compression (fast on Android Chrome/Brave & iPad Safari) */
-async function compressImageForUpload(file, maxDimension = 1600, quality = 0.82) {
-  if (!file || !file.type.startsWith('image/')) return file;
-  // Skip tiny images already under 350 KB
-  if (file.size <= 350 * 1024 && (file.type === 'image/jpeg' || file.type === 'image/webp')) {
-    return file;
-  }
-
-  let source = null;
-  let width = 0;
-  let height = 0;
-  let cleanup = () => {};
-
-  try {
-    if (typeof createImageBitmap === 'function') {
-      const bitmap = await createImageBitmap(file);
-      source = bitmap;
-      width = bitmap.width;
-      height = bitmap.height;
-      cleanup = () => bitmap.close?.();
-    } else {
-      const url = URL.createObjectURL(file);
-      const img = await new Promise((resolve, reject) => {
-        const el = new Image();
-        el.onload = () => resolve(el);
-        el.onerror = reject;
-        el.src = url;
-      });
-      source = img;
-      width = img.naturalWidth || img.width;
-      height = img.naturalHeight || img.height;
-      cleanup = () => URL.revokeObjectURL(url);
-    }
-
-    const scale = Math.min(1, maxDimension / Math.max(width, height, 1));
-    const targetW = Math.max(1, Math.round(width * scale));
-    const targetH = Math.max(1, Math.round(height * scale));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return file;
-    ctx.drawImage(source, 0, 0, targetW, targetH);
-
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
-    if (!blob || blob.size >= file.size) {
-      return file;
-    }
-    const baseName = (file.name || 'scan').replace(/\.[^.]+$/, '');
-    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
-  } catch {
-    return file;
-  } finally {
-    cleanup();
-  }
-}
-
-/* XMLHttpRequest wrapper to track real upload byte progress */
-function uploadFormWithProgress(url, formData, onUploadFraction) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url, true);
-
-    xhr.upload.onprogress = (evt) => {
-      if (evt.lengthComputable && evt.total > 0) {
-        onUploadFraction(Math.min(1, evt.loaded / evt.total));
+  function hydrateIconsAndFlags() {
+    document.querySelectorAll(".owl-svg-slot, .owl-dock-avatar, .owl-mini-slot").forEach((el) => {
+      if (!el.innerHTML.trim()) el.innerHTML = OWL_SVG;
+    });
+    document.querySelectorAll(".flag-slot[data-flag]").forEach((el) => {
+      const code = el.getAttribute("data-flag");
+      if (code && FLAG_SVGS[code]) {
+        el.innerHTML = FLAG_SVGS[code];
       }
-    };
-    xhr.upload.onload = () => onUploadFraction(1);
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch {
-          reject(new Error('Invalid JSON response from server'));
-        }
-      } else {
-        let message = xhr.responseText || `Request failed (${xhr.status})`;
-        try {
-          const parsed = JSON.parse(xhr.responseText);
-          if (parsed?.error) message = typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error);
-        } catch {
-          // keep raw text
-        }
-        reject(new Error(message));
-      }
-    };
-
-    xhr.onerror = () => reject(new Error('Network error while uploading image'));
-    xhr.ontimeout = () => reject(new Error('Upload timed out'));
-    xhr.send(formData);
-  });
-}
-
-/* Multi-stage progress controller for Reading & Homework scans */
-function createScanProgress(prefix) {
-  const card = $(`${prefix}-loading`);
-  const thumb = $(`${prefix}-progress-thumb`);
-  const stageEl = $(`${prefix}-progress-stage`);
-  const pctEl = $(`${prefix}-progress-pct`);
-  const barEl = $(`${prefix}-progress-bar`);
-  const fillEl = $(`${prefix}-progress-fill`);
-  const stepsEl = $(`${prefix}-progress-steps`);
-  const sizeEl = $(`${prefix}-progress-size`);
-
-  let currentPct = 0;
-  let analyzeTimer = null;
-
-  function setPct(pct) {
-    currentPct = Math.max(currentPct, Math.min(100, Math.round(pct)));
-    pctEl.textContent = `${currentPct}%`;
-    fillEl.style.width = `${currentPct}%`;
-    barEl.setAttribute('aria-valuenow', String(currentPct));
-  }
-
-  function setStep(activeStep) {
-    const order = ['optimize', 'upload', 'analyze'];
-    const activeIdx = order.indexOf(activeStep);
-    stepsEl.querySelectorAll('.p-step').forEach((el) => {
-      const idx = order.indexOf(el.dataset.step);
-      el.classList.toggle('is-done', activeStep === 'done' || (activeIdx >= 0 && idx < activeIdx));
-      el.classList.toggle('is-active', activeStep !== 'done' && idx === activeIdx);
     });
   }
 
-  return {
-    start(previewUrl) {
-      clearInterval(analyzeTimer);
-      currentPct = 0;
-      sizeEl.textContent = '';
-      if (previewUrl) {
-        thumb.src = previewUrl;
-        thumb.hidden = false;
-      } else {
-        thumb.hidden = true;
-      }
-      stageEl.textContent = 'Optimizing photo…';
-      setStep('optimize');
-      setPct(8);
-      card.hidden = false;
-    },
-    setSizeInfo(originalBytes, optimizedBytes) {
-      if (originalBytes > optimizedBytes) {
-        sizeEl.textContent = `${formatBytes(originalBytes)} → ${formatBytes(optimizedBytes)}`;
-      } else {
-        sizeEl.textContent = formatBytes(optimizedBytes);
-      }
-    },
-    setUploadFraction(fraction) {
-      stageEl.textContent = fraction < 1 ? 'Uploading photo…' : 'Photo uploaded, starting analysis…';
-      setStep('upload');
-      setPct(15 + fraction * 30);
-    },
-    startAnalyzing(messages) {
-      clearInterval(analyzeTimer);
-      setStep('analyze');
-      setPct(48);
-      let tick = 0;
-      stageEl.textContent = messages[0];
-      analyzeTimer = setInterval(() => {
-        tick += 1;
-        // Asymptotically approach 94% while waiting for Gemini
-        const next = currentPct + Math.max(1, Math.round((94 - currentPct) * 0.16));
-        setPct(Math.min(94, next));
-        const msgIndex = Math.min(messages.length - 1, Math.floor(tick / 4));
-        stageEl.textContent = messages[msgIndex];
-      }, 650);
-    },
-    finish() {
-      clearInterval(analyzeTimer);
-      setStep('done');
-      stageEl.textContent = 'Ready!';
-      setPct(100);
-      setTimeout(() => {
-        card.hidden = true;
-      }, 280);
-    },
-    hide() {
-      clearInterval(analyzeTimer);
-      card.hidden = true;
-    },
-  };
-}
-
-function openPhotoDialog(url) {
-  if (!url) return;
-  $('photo-dialog-img').src = url;
-  $('photo-dialog').showModal();
-}
-
-function flagForLanguage(code) {
-  const norm = (code || '').toLowerCase();
-  if (norm.startsWith('nb') || norm.startsWith('nn') || norm === 'no') return '🇳🇴';
-  if (norm === 'pt-br') return '🇧🇷';
-  if (norm.startsWith('pt')) return '🇵🇹';
-  if (norm === 'en-gb') return '🇬🇧';
-  if (norm.startsWith('en')) return '🇺🇸';
-  if (norm.startsWith('es')) return '🇪🇸';
-  if (norm.startsWith('fr')) return '🇫🇷';
-  if (norm.startsWith('de')) return '🇩🇪';
-  if (norm.startsWith('sv')) return '🇸🇪';
-  if (norm.startsWith('da')) return '🇩🇰';
-  if (norm.startsWith('it')) return '🇮🇹';
-  return '🌐';
-}
-
-/* Cached cloud TTS fetcher (Gemini 3.8 Flash-Lite TTS / Google Cloud TTS + R2 cache) */
-const ttsAudioCache = new Map();
-async function fetchTtsAudio(text, slow = false, languageCodeOverride = null) {
-  const langCode = languageCodeOverride || state.profile?.targetLanguageCode || 'pt-PT';
-  const voice = state.profile?.ttsVoiceName || '';
-  const key = `${langCode}|${voice}|${slow ? '1' : '0'}|${text}`;
-  if (ttsAudioCache.has(key)) {
-    return ttsAudioCache.get(key);
+  function showToast(text) {
+    const container = $("toast-container");
+    if (!container) return;
+    const pill = document.createElement("div");
+    pill.className = "toast-pill";
+    pill.textContent = text;
+    container.appendChild(pill);
+    setTimeout(() => {
+      pill.remove();
+    }, 2800);
   }
-  const promise = (async () => {
-    const payload = JSON.stringify({ text, languageCode: langCode, slow });
-    const headers = { 'Content-Type': 'application/json' };
+
+  function launchConfetti() {
+    const layer = $("confetti-layer");
+    if (!layer) return;
+    const colors = ["#2563EB", "#F59E0B", "#16A34A", "#EC4899", "#0D9488"];
+    for (let i = 0; i < 36; i++) {
+      const bit = document.createElement("span");
+      bit.className = "confetti-bit";
+      bit.style.left = `${Math.random() * 100}%`;
+      bit.style.top = "-12px";
+      bit.style.background = colors[i % colors.length];
+      bit.style.animationDelay = `${Math.random() * 0.25}s`;
+      layer.appendChild(bit);
+      setTimeout(() => bit.remove(), 1700);
+    }
+  }
+
+  function setOwlState(next) {
+    const owl = $("hw-owl-svg");
+    if (owl) owl.setAttribute("data-owl-state", next);
+  }
+
+  // ======================================================
+  // IMAGE COMPRESSION & UPLOAD WITH PROGRESS + CANCEL
+  // ======================================================
+  async function compressImageFile(file) {
+    if (!file || !file.type || !file.type.startsWith("image/")) {
+      return file;
+    }
     try {
-      let res = await fetch('/api/audio/speak', { method: 'QUERY', headers, body: payload });
-      if (res.status === 405) {
-        res = await fetch('/api/audio/speak', { method: 'POST', headers, body: payload });
-      }
-      if (!res.ok) return null;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const provider = res.headers.get('X-Audio-Provider') || 'cloud';
-      return { url, provider };
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.readAsDataURL(file);
+      });
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("decode failed"));
+        image.src = dataUrl;
+      });
+      const maxEdge = 1600;
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return file;
+      ctx.drawImage(img, 0, 0, w, h);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.84));
+      if (!blob || blob.size === 0) return file;
+      const baseName = (file.name || "page").replace(/\.[^.]+$/, "");
+      return new File([blob], `${baseName}.jpg`, { type: "image/jpeg" });
     } catch {
+      return file;
+    }
+  }
+
+  function uploadWithProgress(url, formData, { fillEl, msgEl, messages }) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      state.activeUploadXhr = xhr;
+      xhr.open("POST", url, true);
+      xhr.timeout = 60000;
+
+      let msgIdx = 0;
+      let progressVal = 12;
+      fillEl.style.width = `${progressVal}%`;
+      msgEl.textContent = messages[0];
+
+      const msgTimer = setInterval(() => {
+        msgIdx = (msgIdx + 1) % messages.length;
+        msgEl.textContent = messages[msgIdx];
+        if (progressVal < 92) {
+          progressVal = Math.min(92, progressVal + 7);
+          fillEl.style.width = `${progressVal}%`;
+        }
+      }, 2200);
+
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable && ev.total > 0) {
+          const pct = Math.round((ev.loaded / ev.total) * 44);
+          progressVal = Math.max(progressVal, Math.min(48, pct));
+          fillEl.style.width = `${progressVal}%`;
+        }
+      };
+
+      const cleanup = () => {
+        clearInterval(msgTimer);
+        if (state.activeUploadXhr === xhr) state.activeUploadXhr = null;
+      };
+
+      xhr.onload = () => {
+        cleanup();
+        fillEl.style.width = "100%";
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            reject(new Error("Invalid server response"));
+          }
+        } else {
+          let detail = `Server returned ${xhr.status}`;
+          try {
+            const parsed = JSON.parse(xhr.responseText);
+            if (parsed && parsed.error) {
+              detail = typeof parsed.error === "string" ? parsed.error : JSON.stringify(parsed.error);
+            }
+          } catch {}
+          reject(new Error(detail));
+        }
+      };
+
+      xhr.onerror = () => {
+        cleanup();
+        reject(new Error("Network error while uploading photo"));
+      };
+
+      xhr.ontimeout = () => {
+        cleanup();
+        reject(new Error("Upload timed out — please try again"));
+      };
+
+      xhr.onabort = () => {
+        cleanup();
+        const err = new Error("CANCELLED");
+        err.isCancelled = true;
+        reject(err);
+      };
+
+      xhr.send(formData);
+    });
+  }
+
+  // ======================================================
+  // UNIFIED GESTURE-UNLOCKED AUDIO + WAV KARAOKE ENGINE
+  // ======================================================
+  const AudioController = (() => {
+    const sharedAudio = new Audio();
+    sharedAudio.playsInline = true;
+    sharedAudio.preload = "auto";
+
+    let unlocked = false;
+    let runId = 0;
+    let supportsQuery = null; // null | true | false
+    let currentAbort = null;
+    let rafId = 0;
+    let browserTimer = 0;
+    let currentKey = null;
+    let currentState = "idle"; // idle | loading | playing | paused
+    let activeKaraokeEls = [];
+    let currentBrowserJob = null;
+    const lruCache = new Map(); // cacheKey -> { url, trim }
+
+    function unlockSync() {
+      if (unlocked) return;
       try {
-        const res = await fetch('/api/audio/speak', { method: 'POST', headers, body: payload });
-        if (!res.ok) return null;
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const provider = res.headers.get('X-Audio-Provider') || 'cloud';
-        return { url, provider };
+        sharedAudio.muted = true;
+        sharedAudio.src = SILENT_WAV_URI;
+        const p = sharedAudio.play();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+        unlocked = true;
+      } catch {}
+    }
+
+    function clearKaraokeClasses() {
+      for (const el of activeKaraokeEls) {
+        el.classList.remove("is-active", "is-spoken");
+      }
+      activeKaraokeEls = [];
+    }
+
+    function setCache(key, entry) {
+      if (lruCache.has(key)) lruCache.delete(key);
+      lruCache.set(key, entry);
+      if (lruCache.size > 40) {
+        const oldestKey = lruCache.keys().next().value;
+        const oldest = lruCache.get(oldestKey);
+        lruCache.delete(oldestKey);
+        if (oldest && oldest.url) {
+          try {
+            URL.revokeObjectURL(oldest.url);
+          } catch {}
+        }
+      }
+    }
+
+    function notifyUI() {
+      syncAudioButtonsUI();
+    }
+
+    function setState(key, nextState) {
+      currentKey = nextState === "idle" ? null : key;
+      currentState = nextState;
+      notifyUI();
+    }
+
+    function analyzeWavTrim(arrayBuffer) {
+      try {
+        if (arrayBuffer.byteLength < 44) return null;
+        const view = new DataView(arrayBuffer);
+        const tag = (off) =>
+          String.fromCharCode(
+            view.getUint8(off),
+            view.getUint8(off + 1),
+            view.getUint8(off + 2),
+            view.getUint8(off + 3),
+          );
+        if (tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+
+        let offset = 12;
+        let sampleRate = 24000;
+        let channels = 1;
+        let bitsPerSample = 16;
+        let dataOffset = -1;
+        let dataBytes = 0;
+
+        while (offset + 8 <= arrayBuffer.byteLength) {
+          const id = tag(offset);
+          const size = view.getUint32(offset + 4, true);
+          if (id === "fmt " && offset + 24 <= arrayBuffer.byteLength) {
+            channels = view.getUint16(offset + 10, true) || 1;
+            sampleRate = view.getUint32(offset + 12, true) || 24000;
+            bitsPerSample = view.getUint16(offset + 22, true) || 16;
+          } else if (id === "data") {
+            dataOffset = offset + 8;
+            dataBytes = Math.min(size, arrayBuffer.byteLength - dataOffset);
+            break;
+          }
+          offset += 8 + size + (size % 2);
+        }
+
+        if (dataOffset < 0 || bitsPerSample !== 16 || dataBytes < 64) return null;
+        const bytesPerFrame = channels * 2;
+        const totalFrames = Math.floor(dataBytes / bytesPerFrame);
+        const totalSec = totalFrames / sampleRate;
+        const winFrames = Math.max(1, Math.floor(sampleRate * 0.015));
+        const threshold = 480; // ~1.5% of 16-bit full scale
+        let firstSpeechFrame = 0;
+        let lastSpeechFrame = totalFrames - 1;
+        let foundStart = false;
+
+        for (let f = 0; f < totalFrames; f += winFrames) {
+          let peak = 0;
+          const endF = Math.min(totalFrames, f + winFrames);
+          for (let s = f; s < endF; s += 2) {
+            const amp = Math.abs(view.getInt16(dataOffset + s * bytesPerFrame, true));
+            if (amp > peak) peak = amp;
+          }
+          if (peak >= threshold) {
+            if (!foundStart) {
+              firstSpeechFrame = f;
+              foundStart = true;
+            }
+            lastSpeechFrame = endF;
+          }
+        }
+
+        if (!foundStart) return { startSec: 0, endSec: totalSec };
+        const startSec = Math.max(0, firstSpeechFrame / sampleRate - 0.02);
+        const endSec = Math.min(totalSec, Math.max(startSec + 0.14, lastSpeechFrame / sampleRate + 0.03));
+        return { startSec, endSec };
       } catch {
         return null;
       }
     }
-  })();
-  ttsAudioCache.set(key, promise);
-  const result = await promise;
-  if (!result) ttsAudioCache.delete(key);
-  return result;
-}
 
-/* Safari & Android Chrome/Brave friendly TTS with automatic speechSynthesis fallback */
-let currentAudio = null;
-async function speakText(text, slow = false, languageCodeOverride = null) {
-  if (!text) return;
-  if (typeof lyricsPlayer !== 'undefined' && lyricsPlayer.isActive()) {
-    lyricsPlayer.stop();
-  }
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
-  }
-  if (window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
-
-  const langCode = languageCodeOverride || state.profile?.targetLanguageCode || 'pt-PT';
-  const clip = await fetchTtsAudio(text, slow, langCode);
-  if (clip?.url) {
-    const audio = new Audio(clip.url);
-    currentAudio = audio;
-    await audio.play();
-    return;
-  }
-
-  if (window.speechSynthesis) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = langCode;
-    const voice = pickBestVoice(langCode);
-    if (voice) utterance.voice = voice;
-    utterance.rate = slow ? 0.72 : 0.96;
-    window.speechSynthesis.speak(utterance);
-  } else {
-    showToast('Audio playback is unavailable in this browser.');
-  }
-}
-
-/* Navigation */
-function switchTab(tabName) {
-  if (tabName !== 'reading' && typeof lyricsPlayer !== 'undefined' && lyricsPlayer.isActive()) {
-    lyricsPlayer.stop();
-  }
-  document.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.classList.toggle('is-active', btn.dataset.tab === tabName);
-  });
-  document.querySelectorAll('.view').forEach((view) => {
-    const active = view.id === `view-${tabName}`;
-    view.hidden = !active;
-    view.classList.toggle('is-active', active);
-  });
-  if (tabName === 'progress') {
-    loadProgress();
-  } else if (tabName === 'homework') {
-    loadHomeworkSessions();
-  }
-}
-
-/* Profile & Progress Loading */
-async function loadProfile() {
-  state.profile = await apiJson('/api/profile');
-  const p = state.profile;
-  $('learner-subtitle').textContent = `${p.name} · ${flagForLanguage(p.targetLanguageCode)} → ${flagForLanguage(p.nativeLanguageCode)}`;
-  $('flag-q-target').textContent = flagForLanguage(p.targetLanguageCode);
-  $('flag-q-native').textContent = flagForLanguage(p.nativeLanguageCode);
-  $('flag-hw-text').textContent = flagForLanguage(p.targetLanguageCode);
-  $('flag-exp-native').textContent = flagForLanguage(p.nativeLanguageCode);
-  $('flag-exp-target').textContent = flagForLanguage(p.targetLanguageCode);
-  $('prof-name').value = p.name;
-  $('prof-age').value = p.age;
-  $('prof-target-code').value = p.targetLanguageCode;
-  $('prof-target-name').value = p.targetLanguageName;
-  $('prof-native-code').value = p.nativeLanguageCode;
-  $('prof-native-name').value = p.nativeLanguageName;
-  $('prof-tts-voice').value = p.ttsVoiceName;
-  $('prof-dialect-rules').value = p.dialectRules;
-}
-
-async function loadProgress() {
-  state.progress = await apiJson('/api/progress');
-  const pr = state.progress;
-  $('header-stars').textContent = pr.totalStars;
-  $('header-streak').textContent = pr.currentStreakDays;
-  $('stat-stars').textContent = pr.totalStars;
-  $('stat-streak').textContent = pr.currentStreakDays;
-  $('stat-pages').textContent = pr.pagesReadCount;
-
-  const shelf = $('saved-words-shelf');
-  shelf.innerHTML = '';
-  if (!pr.recentWords || pr.recentWords.length === 0) {
-    shelf.innerHTML = '<p class="muted-note">No saved tricky words yet — scan a page to start collecting.</p>';
-    return;
-  }
-  pr.recentWords.forEach((item) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'word-pill';
-    btn.textContent = item.word;
-    btn.addEventListener('click', () => speakText(item.word, true));
-    shelf.appendChild(btn);
-  });
-}
-
-/* Word Dialog */
-function openWordDialog(wordHint) {
-  state.activeWord = wordHint;
-  $('dialog-syllables').textContent = wordHint.syllables || wordHint.word;
-  $('dialog-word').textContent = wordHint.word;
-  $('dialog-hint').textContent = wordHint.nativeHint;
-  $('word-dialog').showModal();
-  speakText(wordHint.word, true);
-}
-
-/* Spotify-Lyrics-Style Read Along Engine */
-function tokenizeSentenceWords(text) {
-  const tokens = [];
-  const regex = /\S+/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    tokens.push({
-      text: match[0],
-      charStart: match.index,
-      charEnd: match.index + match[0].length,
-    });
-  }
-  return tokens;
-}
-
-function computeWordIntervals(tokens) {
-  const weights = tokens.map((t) => {
-    let w = Math.max(2, t.text.replace(/[.,!?;:()"'«»—-]/g, '').length);
-    if (/[,;:]$/.test(t.text)) w += 3;
-    if (/[.!?…]$/.test(t.text)) w += 5;
-    return w;
-  });
-  const total = weights.reduce((sum, w) => sum + w, 0) || 1;
-  let acc = 0;
-  return weights.map((w) => {
-    const start = acc / total;
-    acc += w;
-    const end = acc / total;
-    return { start, end };
-  });
-}
-
-function createLyricsPlayer() {
-  let sentences = [];
-  let cardEls = [];
-  let wordSpanLists = [];
-  let tokenLists = [];
-  let intervalLists = [];
-
-  let status = 'idle'; // 'idle' | 'loading' | 'playing' | 'paused'
-  let currentIndex = -1;
-  let slow = false;
-  let playRunId = 0;
-  let activeAudio = null;
-  let rafId = null;
-  let fallbackTimer = null;
-  let voiceMode = null; // 'natural' | 'device'
-
-  function stopAnimators() {
-    if (rafId !== null) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
-    if (fallbackTimer !== null) {
-      clearInterval(fallbackTimer);
-      fallbackTimer = null;
-    }
-  }
-
-  function updateControls() {
-    const playBtn = $('btn-lyrics-play');
-    const playIcon = $('lyrics-play-icon');
-    const playLabel = $('lyrics-play-label');
-    const stopBtn = $('btn-lyrics-stop');
-    const prevBtn = $('btn-lyrics-prev');
-    const nextBtn = $('btn-lyrics-next');
-    const speedBtn = $('btn-lyrics-speed');
-    const counter = $('lyrics-counter');
-    const badge = $('lyrics-voice-badge');
-
-    const hasLines = sentences.length > 0;
-    playBtn.disabled = !hasLines;
-    stopBtn.disabled = status === 'idle';
-    prevBtn.disabled = !hasLines || currentIndex <= 0;
-    nextBtn.disabled = !hasLines || currentIndex < 0 || currentIndex >= sentences.length - 1;
-
-    if (status === 'loading') {
-      playIcon.textContent = '…';
-      playLabel.textContent = 'Loading';
-    } else if (status === 'playing') {
-      playIcon.textContent = '⏸';
-      playLabel.textContent = 'Pause';
-    } else if (status === 'paused') {
-      playIcon.textContent = '▶';
-      playLabel.textContent = 'Resume';
-    } else {
-      playIcon.textContent = '▶';
-      playLabel.textContent = 'Play';
+    function buildWordWeights(wordEls) {
+      const weights = wordEls.map((el) => {
+        const raw = (el.textContent || "").trim();
+        const vowels = (raw.match(/[aeiouyáàâãéêíóôõúüæøå]+/gi) || []).length;
+        let w = Math.max(1, vowels);
+        if (/[,;:]$/.test(raw)) w += 0.55;
+        else if (/[.!?…]$/.test(raw)) w += 1.05;
+        return w;
+      });
+      const total = weights.reduce((a, b) => a + b, 0) || 1;
+      let acc = 0;
+      return weights.map((w) => {
+        const start = acc / total;
+        acc += w;
+        return { start, end: acc / total };
+      });
     }
 
-    speedBtn.textContent = slow ? '🐢 Slow' : '🐢';
-    speedBtn.setAttribute('aria-pressed', String(slow));
-
-    if (!hasLines) {
-      counter.textContent = '';
-    } else if (currentIndex >= 0) {
-      const stateSuffix = status === 'paused' ? ' · Paused' : '';
-      counter.textContent = `Line ${currentIndex + 1} of ${sentences.length}${stateSuffix}`;
-    } else {
-      counter.textContent = 'Tap Play or any sentence';
-    }
-
-    if (voiceMode) {
-      badge.hidden = false;
-      badge.textContent = voiceMode === 'natural' ? 'Natural Voice' : 'Device Voice';
-      badge.classList.toggle('is-fallback', voiceMode !== 'natural');
-    } else {
-      badge.hidden = true;
-    }
-  }
-
-  function clearWordHighlights(idx) {
-    const spans = wordSpanLists[idx];
-    if (!spans) return;
-    spans.forEach((span) => {
-      span.classList.remove('is-spoken', 'is-current');
-    });
-  }
-
-  function highlightWord(lineIdx, wordIdx) {
-    const spans = wordSpanLists[lineIdx];
-    if (!spans) return;
-    for (let i = 0; i < spans.length; i += 1) {
-      spans[i].classList.toggle('is-spoken', i < wordIdx);
-      spans[i].classList.toggle('is-current', i === wordIdx);
-    }
-  }
-
-  function highlightAllSpoken(lineIdx) {
-    const spans = wordSpanLists[lineIdx];
-    if (!spans) return;
-    spans.forEach((span) => {
-      span.classList.add('is-spoken');
-      span.classList.remove('is-current');
-    });
-  }
-
-  function setActiveLine(idx) {
-    const list = $('reading-sentences');
-    list.classList.toggle('is-reading-along', idx >= 0);
-    cardEls.forEach((card, i) => {
-      const active = i === idx;
-      card.classList.toggle('is-active-line', active);
-      if (!active) clearWordHighlights(i);
-    });
-    if (idx >= 0 && cardEls[idx]) {
-      cardEls[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }
-
-  function teardownPlayback() {
-    stopAnimators();
-    if (activeAudio) {
-      activeAudio.onended = null;
-      activeAudio.onerror = null;
-      activeAudio.pause();
-      activeAudio = null;
-    }
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-  }
-
-  function syncAudioHighlight(lineIdx, audio, runId) {
-    const intervals = intervalLists[lineIdx] || [];
-    const tick = () => {
-      if (runId !== playRunId || status !== 'playing' || !audio) return;
-      if (Number.isFinite(audio.duration) && audio.duration > 0) {
-        const progress = Math.min(0.999, Math.max(0, audio.currentTime / audio.duration));
-        let wordIdx = intervals.findIndex((iv) => progress >= iv.start && progress < iv.end);
-        if (wordIdx < 0) wordIdx = Math.max(0, intervals.length - 1);
-        highlightWord(lineIdx, wordIdx);
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-  }
-
-  async function playSentence(idx, overrideSlow) {
-    if (idx < 0 || idx >= sentences.length) {
-      stop();
-      return;
-    }
-    if (typeof overrideSlow === 'boolean') {
-      slow = overrideSlow;
-    }
-    teardownPlayback();
-    if (currentAudio) {
-      currentAudio.pause();
-      currentAudio = null;
-    }
-
-    playRunId += 1;
-    const runId = playRunId;
-    currentIndex = idx;
-    status = 'loading';
-    setActiveLine(idx);
-    highlightWord(idx, 0);
-    updateControls();
-
-    const text = sentences[idx].targetText;
-
-    // Pre-fetch the next sentence in background so transitions are seamless
-    if (idx + 1 < sentences.length) {
-      fetchTtsAudio(sentences[idx + 1].targetText, slow).catch(() => {});
-    }
-
-    const clip = await fetchTtsAudio(text, slow);
-    if (runId !== playRunId) return;
-
-    if (clip?.url) {
-      voiceMode = 'natural';
-      const audio = new Audio(clip.url);
-      activeAudio = audio;
-      status = 'playing';
-      updateControls();
-
-      audio.onended = () => {
-        if (runId !== playRunId) return;
-        stopAnimators();
-        highlightAllSpoken(idx);
-        if (idx + 1 < sentences.length) {
-          playSentence(idx + 1);
+    function applyHighlightIndex(wordEls, idx) {
+      for (let i = 0; i < wordEls.length; i++) {
+        const el = wordEls[i];
+        if (i < idx) {
+          el.classList.add("is-spoken");
+          el.classList.remove("is-active");
+        } else if (i === idx) {
+          el.classList.add("is-active");
+          el.classList.remove("is-spoken");
         } else {
-          stop();
+          el.classList.remove("is-active", "is-spoken");
         }
-      };
-      audio.onerror = () => {
-        if (runId !== playRunId) return;
-        playWithSpeechSynthesis(idx, runId);
-      };
+      }
+    }
 
+    function pickSpeechVoice(langCode) {
+      if (!("speechSynthesis" in window)) return null;
+      const voices = window.speechSynthesis.getVoices() || [];
+      const target = (langCode || "pt-PT").toLowerCase();
+      if (target.startsWith("pt")) {
+        return (
+          voices.find((v) => v.lang.toLowerCase() === "pt-pt") ||
+          voices.find((v) => v.lang.toLowerCase().startsWith("pt-pt")) ||
+          voices.find((v) => v.lang.toLowerCase().startsWith("pt") && !v.lang.toLowerCase().includes("br")) ||
+          null
+        );
+      }
+      if (target.startsWith("nb") || target.startsWith("no") || target.startsWith("nn")) {
+        return (
+          voices.find((v) => ["nb-no", "no-no", "nn-no"].includes(v.lang.toLowerCase())) ||
+          voices.find((v) => /^(nb|no|nn)/.test(v.lang.toLowerCase())) ||
+          null
+        );
+      }
+      return (
+        voices.find((v) => v.lang.toLowerCase() === target) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith(target.split("-")[0])) ||
+        null
+      );
+    }
+
+    async function fetchSpeakAudio(text, languageCode, slow, signal) {
+      const payload = JSON.stringify({ text, languageCode, slow: Boolean(slow) });
+      const headers = { "Content-Type": "application/json" };
+
+      if (supportsQuery !== false) {
+        try {
+          const resQ = await fetch("/api/audio/speak", {
+            method: "QUERY",
+            headers,
+            body: payload,
+            signal,
+          });
+          if (resQ.status === 405 || resQ.status === 502) {
+            supportsQuery = false;
+          } else {
+            supportsQuery = true;
+            return resQ;
+          }
+        } catch (err) {
+          if (err && err.name === "AbortError") throw err;
+          supportsQuery = false;
+        }
+      }
+
+      return fetch("/api/audio/speak", {
+        method: "POST",
+        headers,
+        body: payload,
+        signal,
+      });
+    }
+
+    function stop() {
+      runId += 1;
+      if (currentAbort) {
+        try {
+          currentAbort.abort();
+        } catch {}
+        currentAbort = null;
+      }
+      cancelAnimationFrame(rafId);
+      clearInterval(browserTimer);
+      currentBrowserJob = null;
       try {
-        await audio.play();
-        if (runId !== playRunId) return;
-        syncAudioHighlight(idx, audio, runId);
-      } catch {
-        if (runId !== playRunId) return;
-        playWithSpeechSynthesis(idx, runId);
+        sharedAudio.pause();
+        sharedAudio.onended = null;
+        sharedAudio.onerror = null;
+      } catch {}
+      if ("speechSynthesis" in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
       }
-      return;
+      clearKaraokeClasses();
+      setState(null, "idle");
     }
 
-    playWithSpeechSynthesis(idx, runId);
-  }
-
-  function playWithSpeechSynthesis(idx, runId) {
-    if (!window.speechSynthesis) {
-      showToast('Audio playback is unavailable in this browser.');
-      stop();
-      return;
-    }
-    voiceMode = 'device';
-    status = 'playing';
-    updateControls();
-
-    const text = sentences[idx].targetText;
-    const tokens = tokenLists[idx] || [];
-    const intervals = intervalLists[idx] || [];
-    const langCode = state.profile?.targetLanguageCode || 'pt-PT';
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = langCode;
-    const voice = pickBestVoice(langCode);
-    if (voice) utterance.voice = voice;
-    utterance.rate = slow ? 0.72 : 0.96;
-
-    let boundarySeen = false;
-    const startedAt = performance.now();
-    // Estimate duration (~13 chars/sec normal, ~9.5 chars/sec slow) as fallback when Android Chrome omits onboundary
-    const estDurationMs = Math.max(900, (text.length / (slow ? 9.5 : 13.5)) * 1000);
-
-    utterance.onboundary = (evt) => {
-      if (runId !== playRunId || status !== 'playing') return;
-      if (typeof evt.charIndex === 'number') {
-        boundarySeen = true;
-        const wordIdx = tokens.findIndex((t) => evt.charIndex >= t.charStart && evt.charIndex <= t.charEnd);
-        if (wordIdx >= 0) {
-          highlightWord(idx, wordIdx);
+    function pause() {
+      if (currentState !== "playing") return;
+      if (currentBrowserJob) {
+        currentBrowserJob.paused = true;
+        cancelAnimationFrame(rafId);
+        clearInterval(browserTimer);
+        if ("speechSynthesis" in window) {
+          try {
+            window.speechSynthesis.cancel();
+          } catch {}
         }
+        setState(currentKey, "paused");
+        return;
       }
-    };
-
-    fallbackTimer = setInterval(() => {
-      if (runId !== playRunId || status !== 'playing' || boundarySeen) return;
-      const frac = Math.min(0.99, (performance.now() - startedAt) / estDurationMs);
-      let wordIdx = intervals.findIndex((iv) => frac >= iv.start && frac < iv.end);
-      if (wordIdx < 0) wordIdx = Math.max(0, intervals.length - 1);
-      highlightWord(idx, wordIdx);
-    }, 90);
-
-    utterance.onend = () => {
-      if (runId !== playRunId) return;
-      stopAnimators();
-      highlightAllSpoken(idx);
-      if (idx + 1 < sentences.length) {
-        playSentence(idx + 1);
-      } else {
+      try {
+        sharedAudio.pause();
+        cancelAnimationFrame(rafId);
+        setState(currentKey, "paused");
+      } catch {
         stop();
       }
-    };
-
-    utterance.onerror = () => {
-      if (runId !== playRunId) return;
-      stop();
-    };
-
-    window.speechSynthesis.speak(utterance);
-  }
-
-  function pause() {
-    if (status !== 'playing' && status !== 'loading') return;
-    stopAnimators();
-    if (activeAudio) {
-      activeAudio.pause();
-      status = 'paused';
-      updateControls();
-      return;
     }
-    // speechSynthesis pause is unreliable on Android Chrome, so cancel and resume cleanly from this line
-    playRunId += 1;
-    if (window.speechSynthesis) {
+
+    function resume() {
+      if (currentState !== "paused") return;
+      unlockSync();
+      if (currentBrowserJob) {
+        const job = currentBrowserJob;
+        job.paused = false;
+        setState(currentKey, "playing");
+        startBrowserUtterance(job);
+        return;
+      }
+      try {
+        sharedAudio.muted = false;
+        const p = sharedAudio.play();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+        setState(currentKey, "playing");
+      } catch {
+        stop();
+      }
+    }
+
+    function startBrowserUtterance(job) {
+      if (!("speechSynthesis" in window)) {
+        job.onDone?.();
+        return;
+      }
       window.speechSynthesis.cancel();
+      const remainingEls = job.wordEls.slice(job.wordOffset);
+      const remainingText =
+        remainingEls.length > 0
+          ? remainingEls.map((el) => el.textContent.trim()).join(" ")
+          : job.text;
+
+      const utt = new SpeechSynthesisUtterance(remainingText);
+      const voice = pickSpeechVoice(job.languageCode);
+      if (voice) utt.voice = voice;
+      utt.lang = voice?.lang || job.languageCode || "pt-PT";
+      utt.rate = job.slow ? 0.72 : 0.96;
+
+      const weights = remainingEls.length > 0 ? buildWordWeights(remainingEls) : [];
+      const wordCount = Math.max(1, remainingText.split(/\s+/).filter(Boolean).length);
+      const estMs = Math.max(650, (wordCount * (job.slow ? 620 : 410)));
+      const startedAt = performance.now();
+      let lastHighlight = -1;
+
+      if (remainingEls.length > 0) {
+        clearInterval(browserTimer);
+        browserTimer = setInterval(() => {
+          if (job.myRunId !== runId || job.paused) return;
+          const frac = Math.min(0.99, (performance.now() - startedAt) / estMs);
+          let relIdx = weights.findIndex((w) => frac <= w.end);
+          if (relIdx < 0) relIdx = remainingEls.length - 1;
+          job.currentWordOffset = job.wordOffset + relIdx;
+          if (job.currentWordOffset !== lastHighlight) {
+            lastHighlight = job.currentWordOffset;
+            applyHighlightIndex(job.wordEls, lastHighlight);
+          }
+        }, 65);
+      }
+
+      utt.onend = () => {
+        if (job.myRunId !== runId || job.paused) return;
+        clearInterval(browserTimer);
+        clearKaraokeClasses();
+        currentBrowserJob = null;
+        setState(null, "idle");
+        job.onDone?.();
+      };
+
+      utt.onerror = () => {
+        if (job.myRunId !== runId || job.paused) return;
+        clearInterval(browserTimer);
+        clearKaraokeClasses();
+        currentBrowserJob = null;
+        setState(null, "idle");
+        job.onDone?.();
+      };
+
+      window.speechSynthesis.speak(utt);
     }
-    status = 'paused';
-    updateControls();
+
+    async function speak({ key, text, languageCode = "pt-PT", slow = false, wordEls = [], onBeforeFetch = null, onEnded = null }) {
+      if (currentKey === key && (currentState === "playing" || currentState === "loading")) {
+        stop();
+        return;
+      }
+
+      stop();
+      unlockSync();
+
+      const myRun = runId;
+      currentAbort = new AbortController();
+      activeKaraokeEls = Array.isArray(wordEls) ? wordEls : [];
+      setState(key, "loading");
+
+      try {
+        let resolvedText = (text || "").trim();
+        if (typeof onBeforeFetch === "function") {
+          const fetchedText = await onBeforeFetch();
+          if (myRun !== runId) return;
+          if (fetchedText) resolvedText = fetchedText.trim();
+        }
+
+        if (!resolvedText) {
+          stop();
+          return;
+        }
+
+        const cacheKey = `${languageCode}|${slow ? 1 : 0}|${resolvedText}`;
+        let cached = lruCache.get(cacheKey);
+
+        if (!cached) {
+          const res = await fetchSpeakAudio(resolvedText, languageCode, slow, currentAbort.signal);
+          if (myRun !== runId) return;
+
+          if (res.ok) {
+            const buffer = await res.arrayBuffer();
+            if (myRun !== runId) return;
+            const contentType = res.headers.get("Content-Type") || "audio/wav";
+            const trim = contentType.includes("wav") ? analyzeWavTrim(buffer) : null;
+            const blob = new Blob([buffer], { type: contentType });
+            const url = URL.createObjectURL(blob);
+            cached = { url, trim };
+            setCache(cacheKey, cached);
+          }
+        }
+
+        if (myRun !== runId) return;
+
+        if (cached) {
+          sharedAudio.muted = false;
+          sharedAudio.src = cached.url;
+          const wordWeights = activeKaraokeEls.length > 0 ? buildWordWeights(activeKaraokeEls) : [];
+          let lastIdx = -1;
+
+          const tick = () => {
+            if (myRun !== runId) return;
+            if (!sharedAudio.paused && activeKaraokeEls.length > 0) {
+              const dur = Number.isFinite(sharedAudio.duration) && sharedAudio.duration > 0 ? sharedAudio.duration : 1;
+              const startSec = cached.trim ? cached.trim.startSec : 0;
+              const endSec = cached.trim ? Math.min(dur, cached.trim.endSec) : dur;
+              const span = Math.max(0.15, endSec - startSec);
+              const progress = Math.max(0, Math.min(1, (sharedAudio.currentTime - startSec) / span));
+              let idx = wordWeights.findIndex((w) => progress <= w.end);
+              if (idx < 0) idx = wordWeights.length - 1;
+              if (idx !== lastIdx) {
+                lastIdx = idx;
+                applyHighlightIndex(activeKaraokeEls, idx);
+              }
+            }
+            if (currentState === "playing") {
+              rafId = requestAnimationFrame(tick);
+            }
+          };
+
+          sharedAudio.onended = () => {
+            if (myRun !== runId) return;
+            cancelAnimationFrame(rafId);
+            clearKaraokeClasses();
+            setState(null, "idle");
+            if (typeof onEnded === "function") onEnded();
+          };
+
+          sharedAudio.onerror = () => {
+            if (myRun !== runId) return;
+            cancelAnimationFrame(rafId);
+            clearKaraokeClasses();
+            setState(null, "idle");
+          };
+
+          setState(key, "playing");
+          await sharedAudio.play();
+          if (myRun !== runId) return;
+          if (activeKaraokeEls.length > 0) {
+            rafId = requestAnimationFrame(tick);
+          }
+          return;
+        }
+
+        // Cloud TTS returned 501 / unavailable -> use Browser speechSynthesis fallback
+        setState(key, "playing");
+        currentBrowserJob = {
+          myRunId: myRun,
+          text: resolvedText,
+          languageCode,
+          slow,
+          wordEls: activeKaraokeEls,
+          wordOffset: 0,
+          currentWordOffset: 0,
+          paused: false,
+          onDone: onEnded,
+        };
+        startBrowserUtterance(currentBrowserJob);
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        if (myRun === runId) {
+          clearKaraokeClasses();
+          setState(null, "idle");
+        }
+      }
+    }
+
+    return {
+      unlockSync,
+      speak,
+      stop,
+      pause,
+      resume,
+      getKey: () => currentKey,
+      getState: () => currentState,
+    };
+  })();
+
+  function syncAudioButtonsUI() {
+    const activeKey = AudioController.getKey();
+    const audioState = AudioController.getState();
+
+    // Sync Owl avatar state
+    if (audioState === "loading" && activeKey && activeKey.startsWith("hw-")) {
+      setOwlState("loading");
+    } else if (audioState === "playing" && activeKey && activeKey.startsWith("hw-")) {
+      setOwlState("speaking");
+    } else if ($("hw-owl-svg")?.getAttribute("data-owl-state") !== "celebrating") {
+      setOwlState("idle");
+    }
+
+    const buttonKeyMap = {
+      "hw-q-listen-pt": "hw-q-pt",
+      "hw-q-listen-no": "hw-q-no",
+      "hw-q-listen-gb": "hw-q-gb",
+      "hw-explain-pt": "hw-explain-pt",
+      "hw-explain-no": "hw-explain-no",
+      "hw-explain-gb": "hw-explain-gb",
+    };
+
+    Object.entries(buttonKeyMap).forEach(([domId, key]) => {
+      const btn = $(domId);
+      if (!btn) return;
+      const isMatch = activeKey === key;
+      const spinner = btn.querySelector(".btn-spinner");
+      const eq = btn.querySelector(".eq-bars");
+      btn.classList.toggle("is-playing", isMatch && audioState === "playing");
+      if (spinner) spinner.hidden = !(isMatch && audioState === "loading");
+      if (eq) eq.hidden = !(isMatch && audioState === "playing");
+    });
+
+    // Sync floating glass dock
+    const dock = $("floating-audio-dock");
+    if (dock && !dock.hidden) {
+      const isDockActive =
+        activeKey && (activeKey.startsWith("read-") || activeKey.startsWith("passage-"));
+      const dockPlayIcon = $("dock-play-icon");
+      const dockBtn = $("dock-play-btn");
+      const dockSpinner = dockBtn?.querySelector(".btn-spinner");
+      if (dockSpinner) dockSpinner.hidden = !(isDockActive && audioState === "loading");
+      if (dockPlayIcon) {
+        dockPlayIcon.hidden = Boolean(isDockActive && audioState === "loading");
+        dockPlayIcon.textContent = isDockActive && audioState === "playing" ? "⏸" : "▶";
+      }
+    }
   }
 
-  function resume() {
-    if (status !== 'paused') return;
-    if (activeAudio) {
-      status = 'playing';
-      updateControls();
-      const runId = playRunId;
-      activeAudio.play().then(() => {
-        if (runId === playRunId) syncAudioHighlight(currentIndex, activeAudio, runId);
-      }).catch(() => playSentence(currentIndex));
+  // ======================================================
+  // KARAOKE TOKEN RENDERING & WORD POPOVER
+  // ======================================================
+  let popoverTimer = 0;
+
+  function showWordPopover(wordEl, hint) {
+    const pop = $("word-popover");
+    if (!pop) return;
+    $("word-popover-syllables").textContent = hint.syllables || hint.word;
+    $("word-popover-hint").textContent = hint.nativeHint || "";
+    const rect = wordEl.getBoundingClientRect();
+    pop.style.left = `${Math.max(12, Math.min(window.innerWidth - 230, rect.left))}px`;
+    pop.style.top = `${Math.max(58, rect.top - 58)}px`;
+    pop.hidden = false;
+    clearTimeout(popoverTimer);
+    popoverTimer = setTimeout(() => {
+      pop.hidden = true;
+    }, 3200);
+  }
+
+  function renderKaraokeWords(container, text, trickyWords = []) {
+    container.innerHTML = "";
+    const wordHintMap = new Map(
+      (trickyWords || []).map((w) => [w.word.toLowerCase().replace(/[.,!?;:"'()]/g, ""), w]),
+    );
+    const tokens = String(text || "").split(/\s+/).filter(Boolean);
+    const spans = [];
+
+    tokens.forEach((tok, idx) => {
+      const span = document.createElement("span");
+      span.className = "karaoke-word";
+      span.textContent = tok;
+      const clean = tok.toLowerCase().replace(/[.,!?;:"'()]/g, "");
+      const hint = wordHintMap.get(clean);
+      if (hint) span.classList.add("is-tricky");
+
+      span.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (hint) showWordPopover(span, hint);
+        AudioController.speak({
+          key: `word-${clean}`,
+          text: clean || tok,
+          languageCode: state.profile?.targetLanguageCode || "pt-PT",
+          slow: true,
+          wordEls: [span],
+        });
+      });
+
+      container.appendChild(span);
+      spans.push(span);
+      if (idx < tokens.length - 1) {
+        container.appendChild(document.createTextNode(" "));
+      }
+    });
+
+    return spans;
+  }
+
+  // ======================================================
+  // SHARED SENTENCE LIST + FLOATING DOCK (PASSAGE & READ)
+  // ======================================================
+  function renderKaraokeSentenceList({
+    containerEl,
+    sentences,
+    keyPrefix,
+    activeIndex,
+    getSlow,
+    onSelectIndex,
+    onTranslatePlay,
+  }) {
+    containerEl.innerHTML = "";
+    const rowsMeta = [];
+
+    sentences.forEach((sent, idx) => {
+      const row = document.createElement("div");
+      row.className = `sentence-row${idx === activeIndex ? " is-active" : ""}`;
+      row.setAttribute("data-idx", String(idx));
+
+      const textEl = document.createElement("div");
+      textEl.className = "sentence-text";
+      textEl.setAttribute("dir", "auto");
+      const wordSpans = renderKaraokeWords(textEl, sent.targetText, sent.trickyWords || []);
+
+      textEl.addEventListener("click", (e) => {
+        if (e.target.closest(".karaoke-word")) return;
+        onSelectIndex(idx);
+        playSentenceFromList(idx, true);
+      });
+
+      const flagsWrap = document.createElement("div");
+      flagsWrap.className = "sentence-flags";
+
+      const noBtn = document.createElement("button");
+      noBtn.className = "flag-icon-btn";
+      noBtn.type = "button";
+      noBtn.title = "Listen in Norwegian";
+      noBtn.setAttribute("aria-label", "Listen to sentence in Norwegian");
+      noBtn.innerHTML = FLAG_SVGS.no;
+      noBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onSelectIndex(idx);
+        onTranslatePlay(idx, "nb-NO", sent);
+      });
+
+      const gbBtn = document.createElement("button");
+      gbBtn.className = "flag-icon-btn";
+      gbBtn.type = "button";
+      gbBtn.title = "Listen in English";
+      gbBtn.setAttribute("aria-label", "Listen to sentence in English");
+      gbBtn.innerHTML = FLAG_SVGS.gb;
+      gbBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onSelectIndex(idx);
+        onTranslatePlay(idx, "en-US", sent);
+      });
+
+      flagsWrap.append(noBtn, gbBtn);
+      row.append(textEl, flagsWrap);
+      containerEl.appendChild(row);
+      rowsMeta.push({ row, wordSpans });
+    });
+
+    function playSentenceFromList(startIdx, autoAdvance) {
+      const item = sentences[startIdx];
+      const meta = rowsMeta[startIdx];
+      if (!item || !meta) return;
+      onSelectIndex(startIdx);
+      Array.from(containerEl.querySelectorAll(".sentence-row")).forEach((r, i) => {
+        r.classList.toggle("is-active", i === startIdx);
+      });
+      meta.row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+      AudioController.speak({
+        key: `${keyPrefix}-${startIdx}`,
+        text: item.targetText,
+        languageCode: state.profile?.targetLanguageCode || "pt-PT",
+        slow: getSlow(),
+        wordEls: meta.wordSpans,
+        onEnded: () => {
+          if (autoAdvance && startIdx + 1 < sentences.length) {
+            playSentenceFromList(startIdx + 1, true);
+          }
+        },
+      });
+    }
+
+    return { playSentenceFromList };
+  }
+
+  let activeDockController = null;
+
+  function updateFloatingDock() {
+    const dock = $("floating-audio-dock");
+    if (!dock) return;
+
+    const showForHomeworkPassage =
+      state.activeTab === "homework" &&
+      !$("hw-session-stage").hidden &&
+      state.hwSubView === "passage" &&
+      state.currentSession?.readingPassage?.sentences?.length > 0;
+
+    const showForRead =
+      state.activeTab === "read" &&
+      !$("read-stage").hidden &&
+      state.readData?.sentences?.length > 0;
+
+    if (!showForHomeworkPassage && !showForRead) {
+      dock.hidden = true;
+      activeDockController = null;
       return;
     }
-    playSentence(Math.max(0, currentIndex));
+
+    dock.hidden = false;
+    const isPassage = showForHomeworkPassage;
+    const sentences = isPassage
+      ? state.currentSession.readingPassage.sentences
+      : state.readData.sentences;
+    const idx = isPassage ? state.passageActiveSentenceIdx : state.readActiveSentenceIdx;
+    const slow = isPassage ? state.hwSlow : state.readSlow;
+
+    $("dock-slow-btn").setAttribute("aria-pressed", String(slow));
+    $("dock-status-label").textContent = `${idx + 1} / ${sentences.length}`;
+    syncAudioButtonsUI();
   }
 
-  function stop() {
-    playRunId += 1;
-    teardownPlayback();
-    status = 'idle';
-    currentIndex = -1;
-    setActiveLine(-1);
-    cardEls.forEach((_, i) => clearWordHighlights(i));
-    updateControls();
-  }
+  // ======================================================
+  // RENDER HOMEWORK VIEW
+  // ======================================================
+  function renderHomeworkStepper(session) {
+    const bar = $("hw-stepper");
+    bar.innerHTML = "";
+    const hasPassage = Boolean(session.readingPassage && session.readingPassage.sentences.length > 0);
 
-  return {
-    load(pageSentences, cards, spans, tokens) {
-      stop();
-      sentences = pageSentences || [];
-      cardEls = cards;
-      wordSpanLists = spans;
-      tokenLists = tokens;
-      intervalLists = tokens.map(computeWordIntervals);
-      updateControls();
-    },
-    isActive() {
-      return status !== 'idle';
-    },
-    playFrom(idx, overrideSlow) {
-      playSentence(idx, overrideSlow);
-    },
-    togglePlayPause() {
-      if (status === 'playing' || status === 'loading') {
-        pause();
-      } else if (status === 'paused') {
-        resume();
-      } else if (sentences.length > 0) {
-        playSentence(0);
-      }
-    },
-    stop,
-    prev() {
-      if (currentIndex > 0) playSentence(currentIndex - 1);
-    },
-    next() {
-      if (currentIndex >= 0 && currentIndex + 1 < sentences.length) {
-        playSentence(currentIndex + 1);
-      }
-    },
-    toggleSpeed() {
-      slow = !slow;
-      updateControls();
-      if (status === 'playing' && currentIndex >= 0) {
-        playSentence(currentIndex, slow);
-      }
-    },
-  };
-}
-
-const lyricsPlayer = createLyricsPlayer();
-const readingProgress = createScanProgress('reading');
-const homeworkProgress = createScanProgress('homework');
-
-function showScanError(prefix, message) {
-  const banner = $(`${prefix}-error`);
-  const msgEl = $(`${prefix}-error-msg`);
-  if (banner && msgEl) {
-    msgEl.textContent = message || 'Unknown error';
-    banner.hidden = false;
-  }
-}
-
-function clearScanError(prefix) {
-  const banner = $(`${prefix}-error`);
-  if (banner) banner.hidden = true;
-}
-
-/* Reading Flow */
-async function handleReadingUpload(file) {
-  if (!file) return;
-  lyricsPlayer.stop();
-  clearScanError('reading');
-  const localUrl = URL.createObjectURL(file);
-  if (state.readingPreviewUrl) {
-    URL.revokeObjectURL(state.readingPreviewUrl);
-  }
-  state.readingPreviewUrl = localUrl;
-
-  $('reading-results').hidden = true;
-  readingProgress.start(localUrl);
-  try {
-    const optimized = await compressImageForUpload(file);
-    readingProgress.setSizeInfo(file.size, optimized.size);
-
-    const form = new FormData();
-    form.append('image', optimized);
-    let analyzingStarted = false;
-
-    state.readingPage = await uploadFormWithProgress('/api/reading/scan', form, (fraction) => {
-      readingProgress.setUploadFraction(fraction);
-      if (fraction >= 1 && !analyzingStarted) {
-        analyzingStarted = true;
-        readingProgress.startAnalyzing([
-          'Reading text on the page…',
-          'Breaking into kid-friendly sentences…',
-          'Finding tricky words & syllables…',
-        ]);
-      }
-    });
-    readingProgress.finish();
-    renderReadingPage();
-  } catch (err) {
-    readingProgress.hide();
-    showScanError('reading', err.message);
-    showToast('Scan failed — see error details above.');
-  }
-}
-
-function renderReadingPage() {
-  const page = state.readingPage;
-  if (!page) return;
-  const photoUrl = page.imageUrl || state.readingPreviewUrl;
-  const photoBtn = $('btn-reading-photo');
-  photoBtn.hidden = !photoUrl;
-
-  const list = $('reading-sentences');
-  list.innerHTML = '';
-
-  const cards = [];
-  const wordSpanLists = [];
-  const tokenLists = [];
-
-  page.sentences.forEach((sentence, idx) => {
-    const card = document.createElement('article');
-    card.className = 'sentence-card';
-
-    const target = document.createElement('p');
-    target.className = 'reading-text reading-text-interactive';
-    target.title = 'Tap to read from this sentence';
-    target.addEventListener('click', () => lyricsPlayer.playFrom(idx));
-
-    const tokens = tokenizeSentenceWords(sentence.targetText);
-    const spans = [];
-    tokens.forEach((tok, tIdx) => {
-      const span = document.createElement('span');
-      span.className = 'karaoke-word';
-      span.textContent = tok.text;
-      target.appendChild(span);
-      spans.push(span);
-      if (tIdx < tokens.length - 1) {
-        target.appendChild(document.createTextNode(' '));
-      }
-    });
-
-    const summary = document.createElement('p');
-    summary.className = 'native-summary';
-    summary.textContent = sentence.nativeSummary;
-
-    const audioRow = document.createElement('div');
-    audioRow.className = 'audio-row';
-
-    const btnListen = document.createElement('button');
-    btnListen.type = 'button';
-    btnListen.className = 'btn btn-secondary btn-sm';
-    btnListen.textContent = '▶ Play';
-    btnListen.addEventListener('click', () => lyricsPlayer.playFrom(idx, false));
-
-    const btnSlow = document.createElement('button');
-    btnSlow.type = 'button';
-    btnSlow.className = 'btn btn-secondary btn-sm';
-    btnSlow.textContent = '🐢';
-    btnSlow.title = 'Slow';
-    btnSlow.addEventListener('click', () => lyricsPlayer.playFrom(idx, true));
-
-    audioRow.append(btnListen, btnSlow);
-
-    const wordsRow = document.createElement('div');
-    wordsRow.className = 'tricky-words-row';
-    (sentence.trickyWords || []).forEach((w) => {
-      const pill = document.createElement('button');
-      pill.type = 'button';
-      pill.className = 'word-pill';
-      pill.textContent = `✨ ${w.word}`;
-      pill.addEventListener('click', () => openWordDialog(w));
-      wordsRow.appendChild(pill);
-    });
-
-    card.append(target, summary, audioRow, wordsRow);
-    list.appendChild(card);
-
-    cards.push(card);
-    wordSpanLists.push(spans);
-    tokenLists.push(tokens);
-  });
-
-  lyricsPlayer.load(page.sentences, cards, wordSpanLists, tokenLists);
-  $('reading-results').hidden = false;
-}
-
-async function finishReadingPage() {
-  if (!state.readingPage) return;
-  const trickyWords = state.readingPage.sentences
-    .flatMap((s) => (s.trickyWords || []).map((w) => w.word))
-    .slice(0, 8);
-  await apiJson('/api/progress/complete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      activityType: 'READING',
-      starsEarned: 10,
-      trickyWords,
-    }),
-  });
-  await loadProgress();
-  launchStarCelebration();
-  showToast('Awesome reading! +10 ⭐');
-}
-
-/* Homework Session Flow */
-let hwSearchQuery = '';
-async function loadHomeworkSessions() {
-  try {
-    state.homeworkSessions = await apiJson('/api/homework/sessions');
-    renderSessionChips();
-    if (!state.activeSession && state.homeworkSessions.length > 0) {
-      selectHomeworkSession(state.homeworkSessions[0]);
+    if (hasPassage) {
+      const pBtn = document.createElement("button");
+      pBtn.type = "button";
+      pBtn.className = `step-pill${state.hwSubView === "passage" ? " is-active" : ""}`;
+      pBtn.innerHTML = `<span aria-hidden="true">📖</span><span>Text</span>`;
+      pBtn.addEventListener("click", () => {
+        AudioController.stop();
+        state.hwSubView = "passage";
+        renderHomeworkSession();
+      });
+      bar.appendChild(pBtn);
     }
-  } catch {
-    // Ignore on initial load
-  }
-}
 
-async function queryHomeworkSessions(q) {
-  hwSearchQuery = (q || '').trim();
-  if (!hwSearchQuery) {
-    await loadHomeworkSessions();
-    return;
-  }
-  try {
-    state.homeworkSessions = await apiJson('/api/homework/sessions', {
-      method: 'QUERY',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: hwSearchQuery, limit: 20 }),
+    (session.exercises || []).forEach((ex, idx) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      const isDone = ex.status === "COMPLETED";
+      const isActive = state.hwSubView === "exercise" && state.hwExerciseIndex === idx;
+      btn.className = `step-pill${isDone ? " is-done" : ""}${isActive ? " is-active" : ""}`;
+      btn.textContent = isDone ? `${ex.label} ✓` : ex.label;
+      btn.addEventListener("click", () => {
+        AudioController.stop();
+        state.hwSubView = "exercise";
+        state.hwExerciseIndex = idx;
+        renderHomeworkSession();
+      });
+      bar.appendChild(btn);
     });
-    renderSessionChips();
-  } catch (err) {
-    showToast(`Search failed: ${err.message}`);
-  }
-}
-
-let hwPagesOpen = false;
-function setHwPagesOpen(open) {
-  hwPagesOpen = open;
-  const drawer = $('homework-recent-sessions');
-  const toggleBtn = $('btn-hw-pages-toggle');
-  if (drawer) drawer.hidden = !open;
-  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(open));
-}
-
-function renderSessionChips() {
-  const container = $('homework-recent-sessions');
-  const chips = $('session-chips');
-  const searchInput = $('hw-search-input');
-  const toggleBtn = $('btn-hw-pages-toggle');
-  const toggleLabel = $('hw-pages-label');
-
-  const count = state.homeworkSessions.length;
-  if (!count && !hwSearchQuery) {
-    container.hidden = true;
-    if (toggleBtn) toggleBtn.hidden = true;
-    return;
   }
 
-  if (toggleBtn) {
-    toggleBtn.hidden = false;
-    if (toggleLabel) {
-      toggleLabel.textContent = state.activeSession ? `#${state.activeSession.id}` : `${count}`;
-    }
-  }
-  container.hidden = !hwPagesOpen && !hwSearchQuery;
-  if (searchInput) {
-    searchInput.hidden = count < 4 && !hwSearchQuery;
-  }
-
-  chips.innerHTML = '';
-  if (!count && hwSearchQuery) {
-    chips.innerHTML = '<span class="muted-note">No matching pages found.</span>';
-    return;
-  }
-  state.homeworkSessions.forEach((session) => {
-    const done = session.exercises.filter((e) => e.status === 'COMPLETED').length;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'session-chip' + (state.activeSession?.id === session.id ? ' is-active' : '');
-    btn.textContent = `#${session.id} (${done}/${session.exercises.length})`;
-    btn.addEventListener('click', () => {
-      setHwPagesOpen(false);
-      selectHomeworkSession(session);
+  async function ensurePassageHydrated(session) {
+    if (!session?.readingPassage) return session?.readingPassage;
+    const needs = session.readingPassage.sentences.some(
+      (s) => !s.nativeSummary?.trim() || !s.englishSummary?.trim(),
+    );
+    if (!needs) return session.readingPassage;
+    const res = await fetch(`/api/homework/sessions/${session.id}/passage/hydrate`, {
+      method: "POST",
     });
-    chips.appendChild(btn);
-  });
-}
-
-async function handleHomeworkScan(file) {
-  if (!file) return;
-  clearScanError('homework');
-  const localUrl = URL.createObjectURL(file);
-  homeworkProgress.start(localUrl);
-  try {
-    const optimized = await compressImageForUpload(file);
-    homeworkProgress.setSizeInfo(file.size, optimized.size);
-
-    const form = new FormData();
-    form.append('image', optimized);
-    let analyzingStarted = false;
-
-    const session = await uploadFormWithProgress('/api/homework/sessions/scan', form, (fraction) => {
-      homeworkProgress.setUploadFraction(fraction);
-      if (fraction >= 1 && !analyzingStarted) {
-        analyzingStarted = true;
-        homeworkProgress.startAnalyzing([
-          'Reading worksheet text…',
-          'Splitting into individual exercises…',
-          'Preparing spoken hints & tricky words…',
-        ]);
-      }
-    });
-    if (!session.imageUrl) {
-      state.localSessionPhotos.set(session.id, localUrl);
-    } else {
-      URL.revokeObjectURL(localUrl);
-    }
-    homeworkProgress.finish();
-    state.homeworkSessions = [session, ...state.homeworkSessions.filter((s) => s.id !== session.id)];
-    selectHomeworkSession(session);
-    showToast(`Found ${session.exercises.length} exercises!`);
-  } catch (err) {
-    URL.revokeObjectURL(localUrl);
-    homeworkProgress.hide();
-    showScanError('homework', err.message);
-    showToast('Scan failed — see error details above.');
-  }
-}
-
-function selectHomeworkSession(session) {
-  state.activeSession = session;
-  const firstPending = session.exercises.findIndex((e) => e.status !== 'COMPLETED');
-  state.activeExerciseIndex = firstPending >= 0 ? firstPending : 0;
-  renderSessionChips();
-  renderHomeworkWorkspace();
-}
-
-async function ensureExerciseHydrated(session, ex) {
-  if (ex.promptNative && ex.explanationTarget && ex.explanationEnglish) {
-    return ex;
-  }
-  const updated = await apiJson(
-    `/api/homework/sessions/${session.id}/exercises/${ex.id}/hydrate`,
-    { method: 'POST' },
-  );
-  if (updated) {
-    session.exercises = session.exercises.map((item) => (item.id === updated.id ? updated : item));
+    if (!res.ok) return session.readingPassage;
+    const updated = await res.json();
+    session.readingPassage = updated;
     return updated;
   }
-  return ex;
-}
 
-function renderHomeworkExplanation() {
-  ['btn-exp-native', 'btn-exp-target', 'btn-exp-english'].forEach((id) => {
-    const btn = $(id);
-    if (btn) {
-      btn.hidden = false;
-      btn.classList.remove('is-playing');
+  async function ensureExerciseHydrated(session, exercise) {
+    if (
+      exercise.promptNative &&
+      exercise.promptEnglish &&
+      exercise.explanationTarget &&
+      exercise.explanationEnglish
+    ) {
+      return exercise;
     }
-  });
-}
-
-async function speakHomeworkPromptNative(btnEl) {
-  const session = state.activeSession;
-  let ex = session?.exercises[state.activeExerciseIndex];
-  if (!session || !ex) return;
-
-  btnEl?.classList.add('is-playing');
-  try {
-    if (!ex.promptNative) {
-      ex = await ensureExerciseHydrated(session, ex);
-    }
-    if (ex.promptNative) {
-      await speakText(ex.promptNative, false, state.profile?.nativeLanguageCode || 'nb-NO');
-    }
-  } catch (err) {
-    showToast(`Could not load audio: ${err.message}`);
-  } finally {
-    setTimeout(() => btnEl?.classList.remove('is-playing'), 900);
-  }
-}
-
-async function speakHomeworkHint(kind, btnEl) {
-  const session = state.activeSession;
-  let ex = session?.exercises[state.activeExerciseIndex];
-  if (!session || !ex) return;
-
-  document.querySelectorAll('.hint-flag-btn').forEach((b) => b.classList.remove('is-playing'));
-  btnEl?.classList.add('is-playing');
-
-  try {
-    if ((kind === 'target' && !ex.explanationTarget) || (kind === 'english' && !ex.explanationEnglish)) {
-      ex = await ensureExerciseHydrated(session, ex);
-    }
-    let text = '';
-    let langCode = 'nb-NO';
-    if (kind === 'native') {
-      text = ex.explanationNative;
-      langCode = state.profile?.nativeLanguageCode || 'nb-NO';
-    } else if (kind === 'target') {
-      text = ex.explanationTarget;
-      langCode = state.profile?.targetLanguageCode || 'pt-PT';
-    } else if (kind === 'english') {
-      text = ex.explanationEnglish;
-      langCode = 'en-GB';
-    }
-    if (text) {
-      await speakText(text, false, langCode);
-    }
-  } catch (err) {
-    showToast(`Could not load audio: ${err.message}`);
-  } finally {
-    setTimeout(() => btnEl?.classList.remove('is-playing'), 900);
-  }
-}
-
-function renderHomeworkWorkspace() {
-  const session = state.activeSession;
-  if (!session || !session.exercises.length) {
-    $('homework-workspace').hidden = true;
-    return;
-  }
-  $('homework-workspace').hidden = false;
-
-  const photoUrl = session.imageUrl || state.localSessionPhotos.get(session.id) || null;
-  const photoBtn = $('btn-hw-photo');
-  if (photoUrl) {
-    $('hw-photo-thumb').src = photoUrl;
-    photoBtn.hidden = false;
-  } else {
-    photoBtn.hidden = true;
+    const res = await fetch(
+      `/api/homework/sessions/${session.id}/exercises/${exercise.id}/hydrate`,
+      { method: "POST" },
+    );
+    if (!res.ok) return exercise;
+    const updated = await res.json();
+    Object.assign(exercise, updated);
+    return exercise;
   }
 
-  const stepper = $('hw-exercise-stepper');
-  stepper.innerHTML = '';
+  function renderHomeworkSession() {
+    const session = state.currentSession;
+    const emptyEl = $("hw-empty-state");
+    const progEl = $("hw-progress-card");
+    const errEl = $("hw-error-card");
+    const stageEl = $("hw-session-stage");
 
-  const hasPageText = Boolean(session.pageTextTarget && session.pageTextTarget.trim());
-  if (hasPageText) {
-    const textBtn = document.createElement('button');
-    textBtn.type = 'button';
-    textBtn.className = 'step-btn' + (state.activeExerciseIndex === -1 ? ' is-active' : '');
-    textBtn.textContent = '📖 Text';
-    textBtn.addEventListener('click', () => {
-      state.activeExerciseIndex = -1;
-      renderHomeworkWorkspace();
-    });
-    stepper.appendChild(textBtn);
-  }
+    progEl.hidden = true;
+    errEl.hidden = true;
 
-  session.exercises.forEach((ex, idx) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'step-btn';
-    if (idx === state.activeExerciseIndex) btn.classList.add('is-active');
-    if (ex.status === 'COMPLETED') btn.classList.add('is-done');
-    btn.textContent = `${ex.status === 'COMPLETED' ? '✓ ' : ''}#${ex.label}`;
-    btn.addEventListener('click', () => {
-      state.activeExerciseIndex = idx;
-      renderHomeworkWorkspace();
-    });
-    stepper.appendChild(btn);
-  });
-
-  const textCard = $('hw-text-card');
-  const exCard = $('hw-active-exercise');
-  if (state.activeExerciseIndex === -1 && hasPageText) {
-    textCard.hidden = false;
-    exCard.hidden = true;
-    const body = $('hw-page-text');
-    body.innerHTML = '';
-    const lines = session.pageTextTarget
-      .split(/\n+/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    lines.forEach((line) => {
-      const p = document.createElement('p');
-      p.className = 'hw-text-line';
-      p.textContent = line;
-      p.title = 'Tap to listen';
-      p.addEventListener('click', () => speakText(line, false, state.profile?.targetLanguageCode));
-      body.appendChild(p);
-    });
-    return;
-  }
-
-  textCard.hidden = true;
-  exCard.hidden = false;
-
-  const ex = session.exercises[state.activeExerciseIndex] || session.exercises[0];
-  $('hw-ex-badge').textContent = `Exercise ${ex.label}`;
-  const statusEl = $('hw-ex-status');
-  const isDone = ex.status === 'COMPLETED';
-  statusEl.hidden = !isDone;
-  statusEl.textContent = '⭐ Done!';
-  statusEl.classList.toggle('is-completed', isDone);
-  $('hw-ex-target').textContent = ex.promptTarget;
-  renderHomeworkExplanation();
-
-  const wordsRow = $('hw-ex-words');
-  wordsRow.innerHTML = '';
-  (ex.trickyWords || []).forEach((w) => {
-    const pill = document.createElement('button');
-    pill.type = 'button';
-    pill.className = 'word-pill';
-    pill.textContent = `✨ ${w.word}`;
-    pill.addEventListener('click', () => openWordDialog(w));
-    wordsRow.appendChild(pill);
-  });
-
-  const completeBtn = $('btn-hw-complete');
-  completeBtn.disabled = isDone;
-  completeBtn.textContent = isDone ? '⭐ Done!' : '🎉 Done!';
-}
-
-async function completeActiveExercise() {
-  const session = state.activeSession;
-  if (!session) return;
-  const ex = session.exercises[state.activeExerciseIndex];
-  if (!ex) return;
-  try {
-    await apiJson(`/api/homework/sessions/${session.id}/exercises/${ex.id}/complete`, { method: 'POST' });
-    const updatedSession = await apiJson(`/api/homework/sessions/${session.id}`);
-    state.activeSession = updatedSession;
-    state.homeworkSessions = state.homeworkSessions.map((s) => (s.id === updatedSession.id ? updatedSession : s));
-
-    const trickyWords = (ex.trickyWords || []).map((w) => w.word);
-    await apiJson('/api/progress/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        activityType: 'HOMEWORK',
-        starsEarned: 5,
-        trickyWords,
-      }),
-    });
-    await loadProgress();
-    launchStarCelebration();
-
-    const nextPending = updatedSession.exercises.findIndex((item) => item.status !== 'COMPLETED');
-    if (nextPending >= 0) {
-      state.activeExerciseIndex = nextPending;
-      showToast('Awesome! +5 ⭐ — Next exercise!');
-    } else {
-      showToast('Whole page finished! 🎉 +5 ⭐');
-    }
-    renderSessionChips();
-    renderHomeworkWorkspace();
-  } catch (err) {
-    showToast(`Could not complete exercise: ${err.message}`);
-  }
-}
-
-/* Profile Save */
-async function saveProfile(event) {
-  event.preventDefault();
-  try {
-    state.profile = await apiJson('/api/profile', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: $('prof-name').value.trim(),
-        age: Number($('prof-age').value),
-        targetLanguageCode: $('prof-target-code').value.trim(),
-        targetLanguageName: $('prof-target-name').value.trim(),
-        nativeLanguageCode: $('prof-native-code').value.trim(),
-        nativeLanguageName: $('prof-native-name').value.trim(),
-        ttsVoiceName: $('prof-tts-voice').value.trim(),
-        dialectRules: $('prof-dialect-rules').value.trim(),
-      }),
-    });
-    await loadProfile();
-    showToast('Settings saved!');
-  } catch (err) {
-    showToast(`Could not save settings: ${err.message}`);
-  }
-}
-
-/* Wire Events */
-function init() {
-  document.querySelectorAll('.seg-btn').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-  });
-  document.querySelectorAll('[data-nav]').forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.nav));
-  });
-
-  const onFileSelected = (handler) => (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (file) handler(file);
-  };
-
-  $('reading-camera-input').addEventListener('change', onFileSelected(handleReadingUpload));
-  $('reading-library-input').addEventListener('change', onFileSelected(handleReadingUpload));
-  $('btn-reading-photo').addEventListener('click', () => {
-    openPhotoDialog(state.readingPage?.imageUrl || state.readingPreviewUrl);
-  });
-  $('btn-lyrics-play').addEventListener('click', () => lyricsPlayer.togglePlayPause());
-  $('btn-lyrics-stop').addEventListener('click', () => lyricsPlayer.stop());
-  $('btn-lyrics-prev').addEventListener('click', () => lyricsPlayer.prev());
-  $('btn-lyrics-next').addEventListener('click', () => lyricsPlayer.next());
-  $('btn-lyrics-speed').addEventListener('click', () => lyricsPlayer.toggleSpeed());
-  $('btn-finish-reading').addEventListener('click', finishReadingPage);
-
-  $('homework-camera-input').addEventListener('change', onFileSelected(handleHomeworkScan));
-  $('homework-library-input').addEventListener('change', onFileSelected(handleHomeworkScan));
-  $('btn-hw-pages-toggle').addEventListener('click', () => setHwPagesOpen(!hwPagesOpen));
-  let hwSearchTimer = null;
-  $('hw-search-input').addEventListener('input', (e) => {
-    clearTimeout(hwSearchTimer);
-    const val = e.target.value;
-    hwSearchTimer = setTimeout(() => queryHomeworkSessions(val), 250);
-  });
-  $('btn-hw-photo').addEventListener('click', () => {
-    const session = state.activeSession;
-    const url = session?.imageUrl || (session ? state.localSessionPhotos.get(session.id) : null);
-    openPhotoDialog(url);
-  });
-  $('btn-hw-text-listen').addEventListener('click', () => {
-    speakText(state.activeSession?.pageTextTarget, false, state.profile?.targetLanguageCode);
-  });
-  $('btn-hw-text-slow').addEventListener('click', () => {
-    speakText(state.activeSession?.pageTextTarget, true, state.profile?.targetLanguageCode);
-  });
-  $('btn-hw-listen').addEventListener('click', () => {
-    const ex = state.activeSession?.exercises[state.activeExerciseIndex];
-    speakText(ex?.promptTarget, false, state.profile?.targetLanguageCode);
-  });
-  $('btn-hw-slow').addEventListener('click', () => {
-    const ex = state.activeSession?.exercises[state.activeExerciseIndex];
-    speakText(ex?.promptTarget, true, state.profile?.targetLanguageCode);
-  });
-  $('btn-hw-listen-native').addEventListener('click', (e) => speakHomeworkPromptNative(e.currentTarget));
-  $('btn-exp-native').addEventListener('click', (e) => speakHomeworkHint('native', e.currentTarget));
-  $('btn-exp-target').addEventListener('click', (e) => speakHomeworkHint('target', e.currentTarget));
-  $('btn-exp-english').addEventListener('click', (e) => speakHomeworkHint('english', e.currentTarget));
-  $('btn-hw-complete').addEventListener('click', completeActiveExercise);
-
-  $('profile-form').addEventListener('submit', saveProfile);
-
-  $('btn-dialog-slow').addEventListener('click', () => speakText(state.activeWord?.word, true));
-  $('btn-dialog-normal').addEventListener('click', () => speakText(state.activeWord?.word, false));
-  $('btn-dialog-close').addEventListener('click', () => $('word-dialog').close());
-
-  $('btn-photo-close').addEventListener('click', () => $('photo-dialog').close());
-  $('photo-dialog').addEventListener('click', (e) => {
-    if (e.target === $('photo-dialog')) $('photo-dialog').close();
-  });
-
-  ['reading', 'homework'].forEach((prefix) => {
-    $(`btn-${prefix}-error-close`).addEventListener('click', () => clearScanError(prefix));
-    $(`btn-${prefix}-error-copy`).addEventListener('click', async () => {
-      const text = $(`${prefix}-error-msg`).textContent || '';
-      try {
-        await navigator.clipboard.writeText(text);
-        showToast('Error copied to clipboard');
-      } catch {
-        showToast('Select and copy the error text above');
-      }
-    });
-  });
-
-  /* Theme Toggle (Obsidian Dark default / Alabaster Light) */
-  function applyTheme(theme) {
-    const isLight = theme === 'light';
-    if (isLight) {
-      document.documentElement.dataset.theme = 'light';
-    } else {
-      delete document.documentElement.dataset.theme;
-    }
-    $('theme-icon-sun').hidden = isLight;
-    $('theme-icon-moon').hidden = !isLight;
-    const metaTheme = $('meta-theme-color');
-    if (metaTheme) metaTheme.setAttribute('content', isLight ? '#F6F7F9' : '#0A0B0D');
-    try {
-      localStorage.setItem('socratic-theme', isLight ? 'light' : 'dark');
-    } catch {
-      // ignore storage restrictions
-    }
-  }
-
-  let savedTheme = 'dark';
-  try {
-    savedTheme = localStorage.getItem('socratic-theme') || 'dark';
-  } catch {
-    savedTheme = 'dark';
-  }
-  applyTheme(savedTheme);
-
-  $('btn-theme-toggle').addEventListener('click', () => {
-    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
-    applyTheme(next);
-  });
-
-  /* Raycast-style Command Palette (⌘K / Ctrl+K) */
-  const cmdDialog = $('cmd-dialog');
-  const cmdInput = $('cmd-input');
-  const cmdList = $('cmd-list');
-  let cmdSelected = 0;
-
-  const commands = [
-    { label: 'Take Photo to Read', sub: 'Open camera in Read', kbd: 'R', run: () => { switchTab('reading'); $('reading-camera-input').click(); } },
-    { label: 'Scan Homework Page', sub: 'Open camera in Homework', kbd: 'H', run: () => { switchTab('homework'); $('homework-camera-input').click(); } },
-    { label: 'Play / Pause Read Along', sub: 'Toggle lyrics playback', kbd: 'Space', run: () => { switchTab('reading'); lyricsPlayer.togglePlayPause(); } },
-    { label: 'Toggle Reading Speed', sub: 'Switch 1× / 0.75× Slow', kbd: 'S', run: () => { switchTab('reading'); lyricsPlayer.toggleSpeed(); } },
-    { label: 'Go to Read', sub: 'Reading practice', kbd: '1', run: () => switchTab('reading') },
-    { label: 'Go to Homework', sub: 'One exercise at a time', kbd: '2', run: () => switchTab('homework') },
-    { label: 'Go to Progress', sub: 'Stars, streak & words', kbd: '3', run: () => switchTab('progress') },
-    { label: 'Go to Settings', sub: 'Learner profile & voice', kbd: '4', run: () => switchTab('profile') },
-    {
-      label: 'Toggle Light / Dark Theme',
-      sub: 'Obsidian Dark ↔ Alabaster Light',
-      kbd: 'T',
-      run: () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'),
-    },
-  ];
-
-  function getFilteredCommands() {
-    const q = cmdInput.value.trim().toLowerCase();
-    if (!q) return commands;
-    return commands.filter((c) => c.label.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q));
-  }
-
-  function renderCmdList() {
-    const items = getFilteredCommands();
-    cmdSelected = Math.min(cmdSelected, Math.max(0, items.length - 1));
-    cmdList.innerHTML = '';
-    if (!items.length) {
-      cmdList.innerHTML = '<div class="muted-note" style="padding:12px">No matching commands</div>';
+    if (!session) {
+      emptyEl.hidden = false;
+      stageEl.hidden = true;
+      $("hw-open-pages-empty").hidden = state.sessions.length === 0;
+      updateFloatingDock();
       return;
     }
-    items.forEach((item, idx) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'cmd-item' + (idx === cmdSelected ? ' is-selected' : '');
-      btn.innerHTML = `<span>${item.label}<span class="cmd-item-sub">${item.sub}</span></span><span class="kbd">${item.kbd}</span>`;
-      btn.addEventListener('click', () => {
-        cmdDialog.close();
-        item.run();
+
+    emptyEl.hidden = true;
+    stageEl.hidden = false;
+    $("hw-page-title").textContent = session.pageTitle || "Homework Page";
+    $("hw-photo-btn").hidden = !session.imageUrl;
+
+    const hasPassage = Boolean(session.readingPassage && session.readingPassage.sentences.length > 0);
+    const hasExercises = Boolean(session.exercises && session.exercises.length > 0);
+
+    if (state.hwSubView === "passage" && !hasPassage && hasExercises) {
+      state.hwSubView = "exercise";
+    } else if (state.hwSubView === "exercise" && !hasExercises && hasPassage) {
+      state.hwSubView = "passage";
+    }
+
+    renderHomeworkStepper(session);
+
+    const passageStage = $("hw-passage-stage");
+    const exerciseStage = $("hw-exercise-stage");
+
+    if (state.hwSubView === "passage" && hasPassage) {
+      passageStage.hidden = false;
+      exerciseStage.hidden = true;
+      const passage = session.readingPassage;
+      $("hw-passage-title").textContent = passage.titleTarget || session.pageTitle || "";
+      if (state.passageActiveSentenceIdx >= passage.sentences.length) {
+        state.passageActiveSentenceIdx = 0;
+      }
+
+      const listCtrl = renderKaraokeSentenceList({
+        containerEl: $("hw-passage-sentences"),
+        sentences: passage.sentences,
+        keyPrefix: "passage",
+        activeIndex: state.passageActiveSentenceIdx,
+        getSlow: () => state.hwSlow,
+        onSelectIndex: (idx) => {
+          state.passageActiveSentenceIdx = idx;
+          updateFloatingDock();
+        },
+        onTranslatePlay: (idx, lang, sent) => {
+          const isNo = lang.startsWith("nb");
+          AudioController.speak({
+            key: `passage-tr-${idx}-${lang}`,
+            text: isNo ? sent.nativeSummary : sent.englishSummary,
+            languageCode: lang,
+            slow: state.hwSlow,
+            onBeforeFetch: async () => {
+              const updated = await ensurePassageHydrated(session);
+              const fresh = updated?.sentences?.[idx];
+              return isNo ? fresh?.nativeSummary || "" : fresh?.englishSummary || "";
+            },
+          });
+        },
       });
-      cmdList.appendChild(btn);
+
+      activeDockController = {
+        getCount: () => passage.sentences.length,
+        getIndex: () => state.passageActiveSentenceIdx,
+        setIndex: (i) => {
+          state.passageActiveSentenceIdx = i;
+        },
+        getSlow: () => state.hwSlow,
+        toggleSlow: () => {
+          state.hwSlow = !state.hwSlow;
+          updateFloatingDock();
+        },
+        playIndex: (i) => listCtrl.playSentenceFromList(i, true),
+        keyPrefix: "passage",
+      };
+      updateFloatingDock();
+      return;
+    }
+
+    // Exercise Stage
+    passageStage.hidden = true;
+    exerciseStage.hidden = !hasExercises;
+    updateFloatingDock();
+
+    if (!hasExercises) return;
+    if (state.hwExerciseIndex >= session.exercises.length) {
+      state.hwExerciseIndex = 0;
+    }
+    const ex = session.exercises[state.hwExerciseIndex];
+
+    $("hw-question-badge").textContent = `Question ${ex.label}`;
+    $("hw-question-done-badge").hidden = ex.status !== "COMPLETED";
+    $("hw-q-slow-toggle").setAttribute("aria-pressed", String(state.hwSlow));
+
+    const questionSpans = renderKaraokeWords(
+      $("hw-question-karaoke"),
+      ex.promptTarget,
+      ex.trickyWords || [],
+    );
+
+    // Rebind Question Audio buttons cleanly by cloning or setting onclick
+    $("hw-q-listen-pt").onclick = () => {
+      AudioController.speak({
+        key: "hw-q-pt",
+        text: ex.promptTarget,
+        languageCode: state.profile?.targetLanguageCode || "pt-PT",
+        slow: state.hwSlow,
+        wordEls: questionSpans,
+      });
+    };
+
+    $("hw-q-slow-toggle").onclick = () => {
+      state.hwSlow = !state.hwSlow;
+      $("hw-q-slow-toggle").setAttribute("aria-pressed", String(state.hwSlow));
+    };
+
+    $("hw-q-listen-no").onclick = () => {
+      AudioController.speak({
+        key: "hw-q-no",
+        text: ex.promptNative || "",
+        languageCode: state.profile?.nativeLanguageCode || "nb-NO",
+        slow: state.hwSlow,
+        onBeforeFetch: async () => {
+          const fresh = await ensureExerciseHydrated(session, ex);
+          return fresh.promptNative || "";
+        },
+      });
+    };
+
+    $("hw-q-listen-gb").onclick = () => {
+      AudioController.speak({
+        key: "hw-q-gb",
+        text: ex.promptEnglish || "",
+        languageCode: "en-US",
+        slow: state.hwSlow,
+        onBeforeFetch: async () => {
+          const fresh = await ensureExerciseHydrated(session, ex);
+          return fresh.promptEnglish || "";
+        },
+      });
+    };
+
+    // Tricky words strip
+    const trickyRow = $("hw-tricky-words");
+    trickyRow.innerHTML = "";
+    if (ex.trickyWords && ex.trickyWords.length > 0) {
+      trickyRow.hidden = false;
+      ex.trickyWords.forEach((tw) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "tricky-chip";
+        chip.innerHTML = `<span>🔊 ${tw.word}</span><small>(${tw.syllables})</small>`;
+        chip.addEventListener("click", () => {
+          showWordPopover(chip, tw);
+          AudioController.speak({
+            key: `word-${tw.word}`,
+            text: tw.word,
+            languageCode: state.profile?.targetLanguageCode || "pt-PT",
+            slow: true,
+          });
+        });
+        trickyRow.appendChild(chip);
+      });
+    } else {
+      trickyRow.hidden = true;
+    }
+
+    // Audio-First Owl Helper Dock Flag Buttons
+    $("hw-explain-pt").onclick = () => {
+      AudioController.speak({
+        key: "hw-explain-pt",
+        text: ex.explanationTarget || "",
+        languageCode: state.profile?.targetLanguageCode || "pt-PT",
+        slow: state.hwSlow,
+        onBeforeFetch: async () => {
+          const fresh = await ensureExerciseHydrated(session, ex);
+          return fresh.explanationTarget || "";
+        },
+      });
+    };
+
+    $("hw-explain-no").onclick = () => {
+      AudioController.speak({
+        key: "hw-explain-no",
+        text: ex.explanationNative || "",
+        languageCode: state.profile?.nativeLanguageCode || "nb-NO",
+        slow: state.hwSlow,
+      });
+    };
+
+    $("hw-explain-gb").onclick = () => {
+      AudioController.speak({
+        key: "hw-explain-gb",
+        text: ex.explanationEnglish || "",
+        languageCode: "en-US",
+        slow: state.hwSlow,
+        onBeforeFetch: async () => {
+          const fresh = await ensureExerciseHydrated(session, ex);
+          return fresh.explanationEnglish || "";
+        },
+      });
+    };
+
+    // Ping-Pong Chat Messages
+    renderHomeworkChat(ex);
+  }
+
+  function renderHomeworkChat(ex) {
+    const box = $("hw-chat-messages");
+    box.innerHTML = "";
+    const msgs = ex.messages || [];
+    if (msgs.length === 0 && ex.openingQuestionNative) {
+      appendChatBubble(box, { sender: "TUTOR", content: ex.openingQuestionNative });
+    }
+    msgs.forEach((m) => appendChatBubble(box, m));
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function appendChatBubble(container, msg) {
+    const div = document.createElement("div");
+    div.className = `chat-bubble ${msg.sender === "CHILD" ? "is-child" : "is-tutor"}`;
+    const span = document.createElement("span");
+    span.textContent = msg.content;
+    div.appendChild(span);
+
+    if (msg.sender !== "CHILD") {
+      const speakBtn = document.createElement("button");
+      speakBtn.type = "button";
+      speakBtn.className = "icon-btn";
+      speakBtn.title = "Listen";
+      speakBtn.textContent = "🔊";
+      speakBtn.addEventListener("click", () => {
+        AudioController.speak({
+          key: `chat-${msg.id || Math.random()}`,
+          text: msg.content,
+          languageCode: state.profile?.nativeLanguageCode || "nb-NO",
+          slow: state.hwSlow,
+        });
+      });
+      div.appendChild(speakBtn);
+    }
+    container.appendChild(div);
+  }
+
+  // ======================================================
+  // RENDER READ MODE
+  // ======================================================
+  function renderReadMode() {
+    const emptyEl = $("read-empty-state");
+    const progEl = $("read-progress-card");
+    const errEl = $("read-error-card");
+    const stageEl = $("read-stage");
+
+    progEl.hidden = true;
+    errEl.hidden = true;
+
+    if (!state.readData || !state.readData.sentences?.length) {
+      emptyEl.hidden = false;
+      stageEl.hidden = true;
+      updateFloatingDock();
+      return;
+    }
+
+    emptyEl.hidden = true;
+    stageEl.hidden = false;
+    $("read-photo-btn").hidden = !state.readData.imageUrl;
+
+    const sentences = state.readData.sentences;
+    if (state.readActiveSentenceIdx >= sentences.length) {
+      state.readActiveSentenceIdx = 0;
+    }
+
+    const listCtrl = renderKaraokeSentenceList({
+      containerEl: $("read-sentences"),
+      sentences,
+      keyPrefix: "read",
+      activeIndex: state.readActiveSentenceIdx,
+      getSlow: () => state.readSlow,
+      onSelectIndex: (idx) => {
+        state.readActiveSentenceIdx = idx;
+        updateFloatingDock();
+      },
+      onTranslatePlay: (idx, lang, sent) => {
+        const isNo = lang.startsWith("nb");
+        AudioController.speak({
+          key: `read-tr-${idx}-${lang}`,
+          text: (isNo ? sent.nativeSummary : sent.englishSummary) || sent.nativeSummary || "",
+          languageCode: lang,
+          slow: state.readSlow,
+        });
+      },
+    });
+
+    activeDockController = {
+      getCount: () => sentences.length,
+      getIndex: () => state.readActiveSentenceIdx,
+      setIndex: (i) => {
+        state.readActiveSentenceIdx = i;
+      },
+      getSlow: () => state.readSlow,
+      toggleSlow: () => {
+        state.readSlow = !state.readSlow;
+        updateFloatingDock();
+      },
+      playIndex: (i) => listCtrl.playSentenceFromList(i, true),
+      keyPrefix: "read",
+    };
+
+    updateFloatingDock();
+  }
+
+  // ======================================================
+  // VISUAL RECENT PAGES DRAWER & MODALS
+  // ======================================================
+  function friendlyDate(iso) {
+    try {
+      const d = new Date(iso);
+      const today = new Date();
+      if (d.toDateString() === today.toDateString()) return "Today";
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    } catch {
+      return "";
+    }
+  }
+
+  function renderPagesDrawer(filterText = "") {
+    const list = $("pages-list");
+    const searchWrap = $("pages-search-wrap");
+    searchWrap.hidden = state.sessions.length < 5;
+
+    const q = filterText.trim().toLowerCase();
+    const visible = q
+      ? state.sessions.filter((s) =>
+          `${s.pageTitle} ${s.pageSummaryNative}`.toLowerCase().includes(q),
+        )
+      : state.sessions;
+
+    list.innerHTML = "";
+    if (visible.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "settings-note";
+      empty.textContent = "No saved pages yet.";
+      list.appendChild(empty);
+      return;
+    }
+
+    visible.forEach((sess) => {
+      const card = document.createElement("div");
+      card.className = `page-card-item${state.currentSession?.id === sess.id ? " is-active" : ""}`;
+
+      const thumb = sess.imageUrl
+        ? (() => {
+            const img = document.createElement("img");
+            img.className = "page-thumb";
+            img.src = sess.imageUrl;
+            img.alt = sess.pageTitle || "Homework page";
+            return img;
+          })()
+        : (() => {
+            const ph = document.createElement("div");
+            ph.className = "page-thumb";
+            ph.textContent = "📄";
+            return ph;
+          })();
+
+      const meta = document.createElement("div");
+      meta.className = "page-card-meta";
+      const title = document.createElement("div");
+      title.className = "page-card-title";
+      title.textContent = sess.pageTitle || "Homework Page";
+
+      const sub = document.createElement("div");
+      sub.className = "page-card-sub";
+      const dateSpan = document.createElement("span");
+      dateSpan.textContent = friendlyDate(sess.createdAt);
+      sub.appendChild(dateSpan);
+
+      if (sess.exercises && sess.exercises.length > 0) {
+        const dots = document.createElement("span");
+        dots.className = "progress-dots";
+        sess.exercises.forEach((ex) => {
+          const dot = document.createElement("i");
+          if (ex.status === "COMPLETED") dot.classList.add("is-done");
+          dots.appendChild(dot);
+        });
+        sub.appendChild(dots);
+      }
+      meta.append(title, sub);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "icon-btn";
+      delBtn.title = "Delete page";
+      delBtn.setAttribute("aria-label", "Delete page");
+      delBtn.textContent = "🗑️";
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete "${sess.pageTitle || "this page"}"?`)) return;
+        const res = await fetch(`/api/homework/sessions/${sess.id}`, { method: "DELETE" });
+        if (res.ok) {
+          state.sessions = state.sessions.filter((x) => x.id !== sess.id);
+          if (state.currentSession?.id === sess.id) {
+            state.currentSession = state.sessions[0] || null;
+            if (state.currentSession) {
+              const hasPassage = Boolean(state.currentSession.readingPassage?.sentences?.length);
+              state.hwSubView = hasPassage ? "passage" : "exercise";
+              state.hwExerciseIndex = 0;
+            }
+            renderHomeworkSession();
+          }
+          renderPagesDrawer($("pages-search-input").value);
+          showToast("Page removed");
+        }
+      });
+
+      card.append(thumb, meta, delBtn);
+      card.addEventListener("click", () => {
+        AudioController.stop();
+        state.currentSession = sess;
+        const hasPassage = Boolean(sess.readingPassage?.sentences?.length);
+        state.hwSubView = hasPassage ? "passage" : "exercise";
+        state.hwExerciseIndex = 0;
+        state.passageActiveSentenceIdx = 0;
+        $("pages-drawer").hidden = true;
+        renderHomeworkSession();
+      });
+
+      list.appendChild(card);
     });
   }
 
-  function openCmdPalette() {
-    cmdInput.value = '';
-    cmdSelected = 0;
-    renderCmdList();
-    cmdDialog.showModal();
-    cmdInput.focus();
-  }
+  function renderProgressUI() {
+    $("header-stars-count").textContent = String(state.progress.totalStars ?? 0);
+    $("modal-stars-val").textContent = String(state.progress.totalStars ?? 0);
+    $("modal-streak-val").textContent = String(state.progress.currentStreakDays ?? 0);
+    $("modal-pages-val").textContent = String(state.progress.pagesReadCount ?? 0);
 
-  $('btn-cmd-open').addEventListener('click', openCmdPalette);
-  cmdDialog.addEventListener('click', (e) => {
-    if (e.target === cmdDialog) cmdDialog.close();
-  });
-  cmdInput.addEventListener('input', () => {
-    cmdSelected = 0;
-    renderCmdList();
-  });
-  cmdInput.addEventListener('keydown', (e) => {
-    const items = getFilteredCommands();
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      cmdSelected = (cmdSelected + 1) % Math.max(1, items.length);
-      renderCmdList();
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      cmdSelected = (cmdSelected - 1 + Math.max(1, items.length)) % Math.max(1, items.length);
-      renderCmdList();
-    } else if (e.key === 'Enter' && items[cmdSelected]) {
-      e.preventDefault();
-      cmdDialog.close();
-      items[cmdSelected].run();
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      if (cmdDialog.open) {
-        cmdDialog.close();
-      } else {
-        openCmdPalette();
-      }
+    const wordsEl = $("saved-words-list");
+    wordsEl.innerHTML = "";
+    const words = state.progress.savedWords || [];
+    if (words.length === 0) {
+      const p = document.createElement("p");
+      p.className = "settings-note";
+      p.textContent = "Finish exercises or book pages to collect tricky words here!";
+      wordsEl.appendChild(p);
       return;
     }
-    const tag = (e.target?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || cmdDialog.open) return;
 
-    if (e.code === 'Space' && !$('reading-results').hidden && !$('view-reading').hidden) {
-      e.preventDefault();
-      lyricsPlayer.togglePlayPause();
-    } else if (e.key === 'ArrowLeft' && lyricsPlayer.isActive()) {
-      e.preventDefault();
-      lyricsPlayer.prev();
-    } else if (e.key === 'ArrowRight' && lyricsPlayer.isActive()) {
-      e.preventDefault();
-      lyricsPlayer.next();
+    words.forEach((w) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tricky-chip";
+      btn.textContent = `🔊 ${w.word}`;
+      btn.addEventListener("click", () => {
+        AudioController.speak({
+          key: `saved-${w.word}`,
+          text: w.word,
+          languageCode: w.languageCode || state.profile?.targetLanguageCode || "pt-PT",
+          slow: true,
+        });
+      });
+      wordsEl.appendChild(btn);
+    });
+  }
+
+  // ======================================================
+  // DATA BOOT & UPLOAD HANDLERS
+  // ======================================================
+  async function loadInitialData() {
+    const [profRes, progRes, sessRes] = await Promise.all([
+      fetch("/api/profile").catch(() => null),
+      fetch("/api/progress").catch(() => null),
+      fetch("/api/homework/sessions").catch(() => null),
+    ]);
+
+    if (profRes && profRes.ok) {
+      state.profile = await profRes.json();
     }
-  });
+    if (progRes && progRes.ok) {
+      state.progress = await progRes.json();
+      renderProgressUI();
+    }
+    if (sessRes && sessRes.ok) {
+      state.sessions = await sessRes.json();
+      if (state.sessions.length > 0) {
+        state.currentSession = state.sessions[0];
+        const hasPassage = Boolean(state.currentSession.readingPassage?.sentences?.length);
+        state.hwSubView = hasPassage ? "passage" : "exercise";
+        state.hwExerciseIndex = 0;
+      }
+      renderHomeworkSession();
+    }
+  }
 
-  Promise.all([loadProfile(), loadProgress()]).catch((err) => {
-    showToast(`Unable to connect to Socratic backend: ${err.message}`);
-  });
-}
+  async function handleHomeworkUpload(file) {
+    if (!file || state.isUploading) return;
+    state.isUploading = true;
+    AudioController.stop();
 
-init();
+    const thumbUrl = URL.createObjectURL(file);
+    $("hw-progress-thumb").src = thumbUrl;
+    $("hw-empty-state").hidden = true;
+    $("hw-session-stage").hidden = true;
+    $("hw-error-card").hidden = true;
+    $("hw-progress-card").hidden = false;
+
+    try {
+      const prepared = await compressImageFile(file);
+      const fd = new FormData();
+      fd.append("image", prepared);
+      const created = await uploadWithProgress("/api/homework/sessions/scan", fd, {
+        fillEl: $("hw-progress-fill"),
+        msgEl: $("hw-progress-msg"),
+        messages: [
+          "Owly is looking at your page…",
+          "Finding the story and questions…",
+          "Getting everything ready for you…",
+        ],
+      });
+
+      state.sessions = [created, ...state.sessions.filter((s) => s.id !== created.id)];
+      state.currentSession = created;
+      const hasPassage = Boolean(created.readingPassage?.sentences?.length);
+      state.hwSubView = hasPassage ? "passage" : "exercise";
+      state.hwExerciseIndex = 0;
+      state.passageActiveSentenceIdx = 0;
+      renderHomeworkSession();
+      showToast("Page ready!");
+    } catch (err) {
+      if (err && err.isCancelled) {
+        renderHomeworkSession();
+      } else {
+        $("hw-progress-card").hidden = true;
+        $("hw-error-card").hidden = false;
+        $("hw-error-raw").textContent = err?.message || "Unknown error";
+      }
+    } finally {
+      state.isUploading = false;
+      URL.revokeObjectURL(thumbUrl);
+    }
+  }
+
+  async function handleReadUpload(file) {
+    if (!file || state.isUploading) return;
+    state.isUploading = true;
+    AudioController.stop();
+
+    const thumbUrl = URL.createObjectURL(file);
+    $("read-progress-thumb").src = thumbUrl;
+    $("read-empty-state").hidden = true;
+    $("read-stage").hidden = true;
+    $("read-error-card").hidden = true;
+    $("read-progress-card").hidden = false;
+
+    try {
+      const prepared = await compressImageFile(file);
+      const fd = new FormData();
+      fd.append("image", prepared);
+      const scanned = await uploadWithProgress("/api/reading/scan", fd, {
+        fillEl: $("read-progress-fill"),
+        msgEl: $("read-progress-msg"),
+        messages: [
+          "Owly is reading your book page…",
+          "Splitting sentences for karaoke…",
+          "Almost ready to read aloud…",
+        ],
+      });
+
+      state.readData = scanned;
+      state.readActiveSentenceIdx = 0;
+      renderReadMode();
+      showToast("Book page ready!");
+    } catch (err) {
+      if (err && err.isCancelled) {
+        renderReadMode();
+      } else {
+        $("read-progress-card").hidden = true;
+        $("read-error-card").hidden = false;
+        $("read-error-raw").textContent = err?.message || "Unknown error";
+      }
+    } finally {
+      state.isUploading = false;
+      URL.revokeObjectURL(thumbUrl);
+    }
+  }
+
+  // ======================================================
+  // WIRING ALL DOM EVENTS
+  // ======================================================
+  function wireEvents() {
+    // Tabs
+    const switchTab = (tab) => {
+      AudioController.stop();
+      state.activeTab = tab;
+      $("tab-homework").classList.toggle("is-active", tab === "homework");
+      $("tab-homework").setAttribute("aria-selected", String(tab === "homework"));
+      $("tab-read").classList.toggle("is-active", tab === "read");
+      $("tab-read").setAttribute("aria-selected", String(tab === "read"));
+      $("view-homework").hidden = tab !== "homework";
+      $("view-read").hidden = tab !== "read";
+      updateFloatingDock();
+    };
+
+    $("tab-homework").addEventListener("click", () => switchTab("homework"));
+    $("tab-read").addEventListener("click", () => switchTab("read"));
+
+    // Theme Toggle
+    const syncThemeIcon = () => {
+      const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+      $("theme-toggle-icon").textContent = isDark ? "☀️" : "🌙";
+    };
+    syncThemeIcon();
+
+    $("theme-toggle").addEventListener("click", () => {
+      const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+      const next = isDark ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem("socratic-theme", next);
+      } catch {}
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", next === "dark" ? "#131620" : "#FAF7F2");
+      syncThemeIcon();
+    });
+
+    // Homework Scan Triggers
+    $("hw-camera-btn").addEventListener("click", () => $("hw-file-input").click());
+    $("hw-new-btn").addEventListener("click", () => $("hw-file-input").click());
+    $("hw-error-retry").addEventListener("click", () => $("hw-file-input").click());
+    $("hw-error-dismiss").addEventListener("click", () => renderHomeworkSession());
+    $("hw-file-input").addEventListener("change", (e) => {
+      const f = e.target.files?.[0];
+      e.target.value = "";
+      if (f) handleHomeworkUpload(f);
+    });
+    $("hw-scan-cancel").addEventListener("click", () => {
+      if (state.activeUploadXhr) state.activeUploadXhr.abort();
+    });
+
+    // Read Scan Triggers
+    $("read-camera-btn").addEventListener("click", () => $("read-file-input").click());
+    $("read-new-btn").addEventListener("click", () => $("read-file-input").click());
+    $("read-error-retry").addEventListener("click", () => $("read-file-input").click());
+    $("read-error-dismiss").addEventListener("click", () => renderReadMode());
+    $("read-file-input").addEventListener("change", (e) => {
+      const f = e.target.files?.[0];
+      e.target.value = "";
+      if (f) handleReadUpload(f);
+    });
+    $("read-scan-cancel").addEventListener("click", () => {
+      if (state.activeUploadXhr) state.activeUploadXhr.abort();
+    });
+
+    // Floating Audio Dock Controls
+    $("dock-slow-btn").addEventListener("click", () => {
+      if (activeDockController) activeDockController.toggleSlow();
+    });
+    $("dock-play-btn").addEventListener("click", () => {
+      if (!activeDockController) return;
+      const keyNow = AudioController.getKey();
+      const stateNow = AudioController.getState();
+      const isMyKey = keyNow && keyNow.startsWith(`${activeDockController.keyPrefix}-`);
+      if (isMyKey && stateNow === "playing") {
+        AudioController.pause();
+      } else if (isMyKey && stateNow === "paused") {
+        AudioController.resume();
+      } else {
+        activeDockController.playIndex(activeDockController.getIndex());
+      }
+    });
+    $("dock-stop-btn").addEventListener("click", () => AudioController.stop());
+    $("dock-prev-btn").addEventListener("click", () => {
+      if (!activeDockController) return;
+      const nextIdx = Math.max(0, activeDockController.getIndex() - 1);
+      activeDockController.playIndex(nextIdx);
+    });
+    $("dock-next-btn").addEventListener("click", () => {
+      if (!activeDockController) return;
+      const nextIdx = Math.min(activeDockController.getCount() - 1, activeDockController.getIndex() + 1);
+      activeDockController.playIndex(nextIdx);
+    });
+
+    // Recent Pages Drawer
+    const openPages = () => {
+      renderPagesDrawer("");
+      $("pages-drawer").hidden = false;
+    };
+    $("hw-pages-btn").addEventListener("click", openPages);
+    $("hw-open-pages-empty").addEventListener("click", openPages);
+    $("pages-close-btn").addEventListener("click", () => {
+      $("pages-drawer").hidden = true;
+    });
+    $("pages-drawer").addEventListener("click", (e) => {
+      if (e.target === $("pages-drawer")) $("pages-drawer").hidden = true;
+    });
+    $("pages-search-input").addEventListener("input", (e) => {
+      renderPagesDrawer(e.target.value);
+    });
+
+    // Photo Lightbox
+    const openPhoto = (url) => {
+      if (!url) return;
+      $("photo-modal-img").src = url;
+      $("photo-modal").hidden = false;
+    };
+    $("hw-photo-btn").addEventListener("click", () => openPhoto(state.currentSession?.imageUrl));
+    $("read-photo-btn").addEventListener("click", () => openPhoto(state.readData?.imageUrl));
+    $("photo-close-btn").addEventListener("click", () => {
+      $("photo-modal").hidden = true;
+    });
+    $("photo-modal").addEventListener("click", (e) => {
+      if (e.target === $("photo-modal")) $("photo-modal").hidden = true;
+    });
+
+    // Stars Modal
+    $("stars-pill").addEventListener("click", () => {
+      renderProgressUI();
+      $("stars-modal").hidden = false;
+    });
+    $("stars-close-btn").addEventListener("click", () => {
+      $("stars-modal").hidden = true;
+    });
+    $("stars-modal").addEventListener("click", (e) => {
+      if (e.target === $("stars-modal")) $("stars-modal").hidden = true;
+    });
+
+    // Parent Settings Modal
+    $("settings-btn").addEventListener("click", () => {
+      if (state.profile) {
+        $("set-name").value = state.profile.name || "";
+        $("set-age").value = String(state.profile.age || 8);
+        $("set-target-code").value = state.profile.targetLanguageCode || "pt-PT";
+        $("set-native-code").value = state.profile.nativeLanguageCode || "nb-NO";
+        $("set-voice").value = state.profile.ttsVoiceName || "Sulafat";
+        $("set-dialect").value = state.profile.dialectRules || "";
+      }
+      $("settings-modal").hidden = false;
+    });
+    $("settings-close-btn").addEventListener("click", () => {
+      $("settings-modal").hidden = true;
+    });
+    $("settings-modal").addEventListener("click", (e) => {
+      if (e.target === $("settings-modal")) $("settings-modal").hidden = true;
+    });
+    $("settings-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const body = {
+        name: $("set-name").value.trim(),
+        age: Number($("set-age").value) || 8,
+        targetLanguageCode: $("set-target-code").value.trim(),
+        nativeLanguageCode: $("set-native-code").value.trim(),
+        ttsVoiceName: $("set-voice").value.trim(),
+        dialectRules: $("set-dialect").value.trim(),
+      };
+      const res = await fetch("/api/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        state.profile = await res.json();
+        $("settings-modal").hidden = true;
+        showToast("Settings saved!");
+      } else {
+        showToast("Could not save settings");
+      }
+    });
+
+    // Chat Drawer Toggle & Form
+    $("hw-chat-toggle").addEventListener("click", () => {
+      const drawer = $("hw-chat-drawer");
+      const opening = drawer.hidden;
+      drawer.hidden = !opening;
+      $("hw-chat-toggle").setAttribute("aria-expanded", String(opening));
+    });
+
+    document.querySelectorAll(".quick-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        $("hw-chat-input").value = chip.getAttribute("data-msg") || "";
+        $("hw-chat-form").requestSubmit();
+      });
+    });
+
+    $("hw-chat-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const session = state.currentSession;
+      const ex = session?.exercises?.[state.hwExerciseIndex];
+      const msgText = $("hw-chat-input").value.trim();
+      if (!session || !ex || !msgText) return;
+
+      $("hw-chat-input").value = "";
+      ex.messages = ex.messages || [];
+      ex.messages.push({ sender: "CHILD", content: msgText });
+      renderHomeworkChat(ex);
+
+      const res = await fetch(
+        `/api/homework/sessions/${session.id}/exercises/${ex.id}/reply`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: msgText }),
+        },
+      );
+      if (res.ok) {
+        const reply = await res.json();
+        ex.status = reply.status;
+        ex.messages.push({ sender: "TUTOR", content: reply.replyNative });
+        renderHomeworkChat(ex);
+        renderHomeworkStepper(session);
+      }
+    });
+
+    // Celebrate / Complete Homework Exercise
+    $("hw-complete-btn").addEventListener("click", async () => {
+      const session = state.currentSession;
+      const ex = session?.exercises?.[state.hwExerciseIndex];
+      if (!session || !ex) return;
+
+      AudioController.stop();
+      setOwlState("celebrating");
+      launchConfetti();
+
+      const res = await fetch(
+        `/api/homework/sessions/${session.id}/exercises/${ex.id}/complete`,
+        { method: "POST" },
+      );
+      if (res.ok) {
+        ex.status = "COMPLETED";
+        const words = (ex.trickyWords || []).map((w) => w.word);
+        const progRes = await fetch("/api/progress/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            activityType: "HOMEWORK",
+            starsEarned: 2,
+            trickyWords: words,
+          }),
+        });
+        if (progRes.ok) {
+          state.progress = await progRes.json();
+          renderProgressUI();
+        }
+        showToast("⭐ +2 Stars! Great job!");
+        const nextIdx = session.exercises.findIndex((item, i) => i > state.hwExerciseIndex && item.status !== "COMPLETED");
+        if (nextIdx >= 0) {
+          setTimeout(() => {
+            state.hwExerciseIndex = nextIdx;
+            renderHomeworkSession();
+          }, 900);
+        } else {
+          renderHomeworkSession();
+        }
+      }
+    });
+
+    // Finish Read Page
+    $("read-finish-btn").addEventListener("click", async () => {
+      if (!state.readData) return;
+      launchConfetti();
+      const tricky = (state.readData.sentences || []).flatMap((s) =>
+        (s.trickyWords || []).map((w) => w.word),
+      );
+      const res = await fetch("/api/progress/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activityType: "READING",
+          starsEarned: 3,
+          trickyWords: tricky.slice(0, 12),
+        }),
+      });
+      if (res.ok) {
+        state.progress = await res.json();
+        renderProgressUI();
+      }
+      showToast("⭐ +3 Stars for reading!");
+    });
+  }
+
+  // Boot
+  hydrateIconsAndFlags();
+  wireEvents();
+  loadInitialData();
+})();

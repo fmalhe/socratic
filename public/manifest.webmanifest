@@ -1,17 +1,21 @@
 {
-  "name": "Socratic — Reading & Homework Tutor",
+  "name": "Socratic — Sofia's Reading & Homework Buddy",
   "short_name": "Socratic",
-  "description": "Multilingual reading and homework tutor for kids",
+  "description": "Playful audio-first Portuguese & Norwegian reading and homework buddy for kids.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0A0B0D",
-  "theme_color": "#0A0B0D",
+  "background_color": "#FAF7F2",
+  "theme_color": "#FAF7F2",
   "icons": [
     {
       "src": "/icon.svg",
       "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
     }
   ]
 }

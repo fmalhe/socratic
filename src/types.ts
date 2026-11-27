@@ -33,6 +33,7 @@ export interface WordHint {
 export interface SentenceItem {
   targetText: string;
   nativeSummary: string;
+  englishSummary?: string;
   trickyWords: WordHint[];
 }
 
@@ -59,12 +60,18 @@ export interface HomeworkMessageDto {
   createdAt: string;
 }
 
+export interface HomeworkReadingPassageDto {
+  titleTarget: string;
+  sentences: SentenceItem[];
+}
+
 export interface HomeworkExerciseDto {
   id: number;
   position: number;
   label: string;
   promptTarget: string;
   promptNative?: string | null;
+  promptEnglish?: string | null;
   explanationNative: string;
   explanationTarget?: string | null;
   explanationEnglish?: string | null;
@@ -77,8 +84,10 @@ export interface HomeworkExerciseDto {
 export interface HomeworkSessionResponse {
   id: number;
   profileId: number;
+  pageTitle: string;
   pageSummaryNative: string;
   pageTextTarget: string;
+  readingPassage: HomeworkReadingPassageDto | null;
   imageUrl?: string | null;
   createdAt: string;
   exercises: HomeworkExerciseDto[];

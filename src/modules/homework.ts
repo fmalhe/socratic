@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  arrayBufferToInlineImage,
   callGeminiStructured,
   fileToInlineImage,
   renderHomeworkHelpSystemPrompt,
   renderHomeworkPingPongSystemPrompt,
   renderHomeworkScanSystemPrompt,
+  splitIntoSentences,
 } from "../lib/gemini";
 import type {
   Env,
@@ -13,19 +15,23 @@ import type {
   HomeworkExerciseDto,
   HomeworkHelpResponse,
   HomeworkMessageDto,
+  HomeworkReadingPassageDto,
   HomeworkReplyResponse,
   HomeworkSessionResponse,
   MessageSender,
+  SentenceItem,
   WordHint,
 } from "../types";
 import { getActiveProfile, resolveProfileId } from "./profile";
-import { buildUploadUrl, storeUploadedImage } from "./uploads";
+import { buildUploadUrl, deleteUploadedImage, storeUploadedImage, validateImageUpload } from "./uploads";
 
 interface SessionRow {
   id: number;
   profile_id: number;
+  page_title: string | null;
   page_summary_native: string;
   page_text_target: string;
+  reading_passage_json: string | null;
   image_key: string | null;
   created_at: string;
 }
@@ -37,6 +43,7 @@ interface ExerciseRow {
   label: string;
   prompt_target: string;
   prompt_native: string | null;
+  prompt_english: string | null;
   explanation_native: string;
   explanation_target: string | null;
   explanation_english: string | null;
@@ -55,12 +62,18 @@ interface MessageRow {
 }
 
 interface ScannedHomeworkPage {
+  pageTitle: string;
   pageSummaryNative: string;
   pageTextTarget: string;
+  readingPassage?: {
+    titleTarget: string;
+    sentences: SentenceItem[];
+  } | null;
   exercises: Array<{
     label: string;
     promptTarget: string;
     promptNative: string;
+    promptEnglish: string;
     explanationNative: string;
     explanationTarget: string;
     explanationEnglish: string;
@@ -75,6 +88,16 @@ interface TutorPingPongReply {
   followUpQuestionNative: string;
 }
 
+const WORD_HINT_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    word: { type: "STRING" },
+    syllables: { type: "STRING" },
+    nativeHint: { type: "STRING" },
+  },
+  required: ["word", "syllables", "nativeHint"],
+};
+
 const HOMEWORK_HELP_SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -88,8 +111,29 @@ const HOMEWORK_HELP_SCHEMA = {
 const HOMEWORK_SCAN_SCHEMA = {
   type: "OBJECT",
   properties: {
+    pageTitle: { type: "STRING" },
     pageSummaryNative: { type: "STRING" },
     pageTextTarget: { type: "STRING" },
+    readingPassage: {
+      type: "OBJECT",
+      properties: {
+        titleTarget: { type: "STRING" },
+        sentences: {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              targetText: { type: "STRING" },
+              nativeSummary: { type: "STRING" },
+              englishSummary: { type: "STRING" },
+              trickyWords: { type: "ARRAY", items: WORD_HINT_SCHEMA },
+            },
+            required: ["targetText", "nativeSummary", "englishSummary", "trickyWords"],
+          },
+        },
+      },
+      required: ["titleTarget", "sentences"],
+    },
     exercises: {
       type: "ARRAY",
       items: {
@@ -98,20 +142,13 @@ const HOMEWORK_SCAN_SCHEMA = {
           label: { type: "STRING" },
           promptTarget: { type: "STRING" },
           promptNative: { type: "STRING" },
+          promptEnglish: { type: "STRING" },
           explanationNative: { type: "STRING" },
           explanationTarget: { type: "STRING" },
           explanationEnglish: { type: "STRING" },
           trickyWords: {
             type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                word: { type: "STRING" },
-                syllables: { type: "STRING" },
-                nativeHint: { type: "STRING" },
-              },
-              required: ["word", "syllables", "nativeHint"],
-            },
+            items: WORD_HINT_SCHEMA,
           },
           openingQuestionNative: { type: "STRING" },
         },
@@ -119,6 +156,7 @@ const HOMEWORK_SCAN_SCHEMA = {
           "label",
           "promptTarget",
           "promptNative",
+          "promptEnglish",
           "explanationNative",
           "explanationTarget",
           "explanationEnglish",
@@ -128,7 +166,7 @@ const HOMEWORK_SCAN_SCHEMA = {
       },
     },
   },
-  required: ["pageSummaryNative", "pageTextTarget", "exercises"],
+  required: ["pageTitle", "pageSummaryNative", "pageTextTarget", "readingPassage", "exercises"],
 };
 
 const PING_PONG_SCHEMA = {
@@ -145,44 +183,147 @@ const replySchema = z.object({
   message: z.string().trim().min(1),
 });
 
-async function loadMessages(db: D1Database, exerciseId: number): Promise<HomeworkMessageDto[]> {
-  const res = await db
-    .prepare("SELECT * FROM homework_message WHERE exercise_id = ? ORDER BY id ASC")
-    .bind(exerciseId)
-    .all<MessageRow>();
-  return (res.results ?? []).map((m) => ({
-    id: m.id,
-    sender: m.sender,
-    content: m.content,
-    targetPhrase: m.target_phrase,
-    createdAt: m.created_at,
-  }));
+function derivePageTitle(row: SessionRow): string {
+  if (row.page_title?.trim()) {
+    return row.page_title.trim();
+  }
+  const source = row.page_text_target?.trim() || row.page_summary_native?.trim() || "";
+  if (!source) return "Página de TPC";
+  const firstLine = source.split(/[\n.!?]/)[0]?.trim() || source;
+  const words = firstLine.split(/\s+/).filter(Boolean).slice(0, 5);
+  const title = words.join(" ");
+  return title.length > 44 ? `${title.slice(0, 41).trim()}...` : title || "Página de TPC";
 }
 
-async function loadExercises(db: D1Database, sessionId: number): Promise<HomeworkExerciseDto[]> {
-  const res = await db
-    .prepare("SELECT * FROM homework_exercise WHERE session_id = ? ORDER BY position ASC")
-    .bind(sessionId)
+function normalizePassage(
+  passage: { titleTarget?: string; sentences?: SentenceItem[] } | null | undefined,
+  fallbackTitle: string,
+): HomeworkReadingPassageDto | null {
+  if (!passage || !Array.isArray(passage.sentences) || passage.sentences.length === 0) {
+    return null;
+  }
+  const cleaned = passage.sentences
+    .filter((s) => s && typeof s.targetText === "string" && s.targetText.trim().length > 0)
+    .map((s) => ({
+      targetText: s.targetText.trim(),
+      nativeSummary: (s.nativeSummary ?? "").trim(),
+      englishSummary: (s.englishSummary ?? "").trim(),
+      trickyWords: Array.isArray(s.trickyWords) ? s.trickyWords : [],
+    }));
+  if (cleaned.length === 0) return null;
+  return {
+    titleTarget: (passage.titleTarget ?? "").trim() || fallbackTitle,
+    sentences: cleaned,
+  };
+}
+
+function parseReadingPassage(row: SessionRow, pageTitle: string): HomeworkReadingPassageDto | null {
+  if (row.reading_passage_json !== null && row.reading_passage_json !== undefined) {
+    try {
+      const parsed = JSON.parse(row.reading_passage_json) as HomeworkReadingPassageDto;
+      return normalizePassage(parsed, pageTitle);
+    } catch {
+      return null;
+    }
+  }
+  // Legacy sessions created before migration 0006 fall back to splitting page_text_target
+  const sentenceTexts = splitIntoSentences(row.page_text_target ?? "");
+  if (sentenceTexts.length === 0) return null;
+  return {
+    titleTarget: pageTitle,
+    sentences: sentenceTexts.map((targetText) => ({
+      targetText,
+      nativeSummary: "",
+      englishSummary: "",
+      trickyWords: [],
+    })),
+  };
+}
+
+async function hydrateSessionRows(
+  db: D1Database,
+  sessionRows: SessionRow[],
+): Promise<HomeworkSessionResponse[]> {
+  if (sessionRows.length === 0) {
+    return [];
+  }
+
+  const sessionIds = sessionRows.map((s) => s.id);
+  const sessionPlaceholders = sessionIds.map(() => "?").join(", ");
+  const exerciseRes = await db
+    .prepare(
+      `SELECT * FROM homework_exercise WHERE session_id IN (${sessionPlaceholders}) ORDER BY session_id ASC, position ASC`,
+    )
+    .bind(...sessionIds)
     .all<ExerciseRow>();
 
-  const exercises: HomeworkExerciseDto[] = [];
-  for (const row of res.results ?? []) {
-    exercises.push({
+  const exerciseRows = exerciseRes.results ?? [];
+  const messagesByExercise = new Map<number, HomeworkMessageDto[]>();
+
+  if (exerciseRows.length > 0) {
+    const exerciseIds = exerciseRows.map((e) => e.id);
+    const exercisePlaceholders = exerciseIds.map(() => "?").join(", ");
+    const msgRes = await db
+      .prepare(
+        `SELECT * FROM homework_message WHERE exercise_id IN (${exercisePlaceholders}) ORDER BY id ASC`,
+      )
+      .bind(...exerciseIds)
+      .all<MessageRow>();
+
+    for (const m of msgRes.results ?? []) {
+      const list = messagesByExercise.get(m.exercise_id) ?? [];
+      list.push({
+        id: m.id,
+        sender: m.sender,
+        content: m.content,
+        targetPhrase: m.target_phrase,
+        createdAt: m.created_at,
+      });
+      messagesByExercise.set(m.exercise_id, list);
+    }
+  }
+
+  const exercisesBySession = new Map<number, HomeworkExerciseDto[]>();
+  for (const row of exerciseRows) {
+    let trickyWords: WordHint[] = [];
+    try {
+      trickyWords = JSON.parse(row.tricky_words_json) as WordHint[];
+    } catch {
+      trickyWords = [];
+    }
+    const list = exercisesBySession.get(row.session_id) ?? [];
+    list.push({
       id: row.id,
       position: row.position,
       label: row.label,
       promptTarget: row.prompt_target,
       promptNative: row.prompt_native ?? null,
+      promptEnglish: row.prompt_english ?? null,
       explanationNative: row.explanation_native,
       explanationTarget: row.explanation_target ?? null,
       explanationEnglish: row.explanation_english ?? null,
-      trickyWords: JSON.parse(row.tricky_words_json) as WordHint[],
+      trickyWords,
       openingQuestionNative: row.opening_question_native,
       status: row.status,
-      messages: await loadMessages(db, row.id),
+      messages: messagesByExercise.get(row.id) ?? [],
     });
+    exercisesBySession.set(row.session_id, list);
   }
-  return exercises;
+
+  return sessionRows.map((row) => {
+    const pageTitle = derivePageTitle(row);
+    return {
+      id: row.id,
+      profileId: row.profile_id,
+      pageTitle,
+      pageSummaryNative: row.page_summary_native,
+      pageTextTarget: row.page_text_target,
+      readingPassage: parseReadingPassage(row, pageTitle),
+      imageUrl: buildUploadUrl(row.image_key),
+      createdAt: row.created_at,
+      exercises: exercisesBySession.get(row.id) ?? [],
+    };
+  });
 }
 
 export async function getHomeworkSession(
@@ -197,39 +338,22 @@ export async function getHomeworkSession(
   if (!row) {
     return null;
   }
-  return {
-    id: row.id,
-    profileId: row.profile_id,
-    pageSummaryNative: row.page_summary_native,
-    pageTextTarget: row.page_text_target,
-    imageUrl: buildUploadUrl(row.image_key),
-    createdAt: row.created_at,
-    exercises: await loadExercises(db, row.id),
-  };
+  const [hydrated] = await hydrateSessionRows(db, [row]);
+  return hydrated ?? null;
 }
 
 export async function listHomeworkSessions(
   db: D1Database,
   profileId: number,
+  options?: { limit?: number },
 ): Promise<HomeworkSessionResponse[]> {
+  const limit = Math.max(1, Math.min(50, options?.limit ?? 20));
   const res = await db
-    .prepare("SELECT * FROM homework_session WHERE profile_id = ? ORDER BY id DESC LIMIT 10")
-    .bind(profileId)
+    .prepare("SELECT * FROM homework_session WHERE profile_id = ? ORDER BY id DESC LIMIT ?")
+    .bind(profileId, limit)
     .all<SessionRow>();
 
-  const sessions: HomeworkSessionResponse[] = [];
-  for (const row of res.results ?? []) {
-    sessions.push({
-      id: row.id,
-      profileId: row.profile_id,
-      pageSummaryNative: row.page_summary_native,
-      pageTextTarget: row.page_text_target,
-      imageUrl: buildUploadUrl(row.image_key),
-      createdAt: row.created_at,
-      exercises: await loadExercises(db, row.id),
-    });
-  }
-  return sessions;
+  return hydrateSessionRows(db, res.results ?? []);
 }
 
 export const homeworkRoutes = new Hono<{ Bindings: Env }>();
@@ -262,41 +386,54 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   const form = await c.req.formData();
   const image = form.get("image");
-  if (!(image instanceof File) || image.size === 0) {
-    return c.json({ error: "Image file must not be empty" }, 400);
-  }
+  validateImageUpload(image);
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const [inlineImage, stored] = await Promise.all([
-    fileToInlineImage(image),
-    storeUploadedImage(c.env, image, "homework"),
-  ]);
+  const buffer = await image.arrayBuffer();
+  const inlineImage = arrayBufferToInlineImage(buffer, image.type || "image/jpeg");
+  const stored = await storeUploadedImage(c.env, image, "homework", buffer);
 
   const scanned = await callGeminiStructured<ScannedHomeworkPage>(c.env, {
     systemPrompt: renderHomeworkScanSystemPrompt(profile),
-    userText: "Please scan this homework page and break down each exercise.",
+    userText: "Please scan this homework page, extract any reading passage verbatim, and break down each exercise.",
     image: inlineImage,
     responseSchema: HOMEWORK_SCAN_SCHEMA,
   });
 
+  const pageTitle = scanned.pageTitle?.trim() || "Página de TPC";
+  const passageToStore: HomeworkReadingPassageDto = {
+    titleTarget: scanned.readingPassage?.titleTarget?.trim() || pageTitle,
+    sentences: Array.isArray(scanned.readingPassage?.sentences) ? scanned.readingPassage.sentences : [],
+  };
+
   const insertSession = await c.env.DB.prepare(
-    "INSERT INTO homework_session (profile_id, page_summary_native, page_text_target, image_key) VALUES (?, ?, ?, ?)",
+    `INSERT INTO homework_session
+       (profile_id, page_title, page_summary_native, page_text_target, reading_passage_json, image_key)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   )
-    .bind(profile.id, scanned.pageSummaryNative, scanned.pageTextTarget, stored.imageKey)
+    .bind(
+      profile.id,
+      pageTitle,
+      scanned.pageSummaryNative,
+      scanned.pageTextTarget,
+      JSON.stringify(passageToStore),
+      stored.imageKey,
+    )
     .run();
 
   const sessionId = Number(insertSession.meta.last_row_id);
-  const exerciseStatements = scanned.exercises.map((ex, idx) =>
+  const exerciseStatements = (scanned.exercises ?? []).map((ex, idx) =>
     c.env.DB.prepare(
       `INSERT INTO homework_exercise
-         (session_id, position, label, prompt_target, prompt_native, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
+         (session_id, position, label, prompt_target, prompt_native, prompt_english, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
     ).bind(
       sessionId,
       idx + 1,
       ex.label,
       ex.promptTarget,
       ex.promptNative ?? null,
+      ex.promptEnglish ?? null,
       ex.explanationNative,
       ex.explanationTarget ?? null,
       ex.explanationEnglish ?? null,
@@ -327,8 +464,11 @@ function matchesHomeworkQuery(session: HomeworkSessionResponse, needle: string, 
   }
   if (!needle) return true;
   const haystacks = [
+    session.pageTitle,
     session.pageSummaryNative,
     session.pageTextTarget,
+    session.readingPassage?.titleTarget ?? "",
+    ...(session.readingPassage?.sentences ?? []).flatMap((s) => [s.targetText, s.nativeSummary]),
     ...session.exercises.flatMap((ex) => [
       ex.label,
       ex.promptTarget,
@@ -349,7 +489,16 @@ homeworkRoutes.on("OPTIONS", "/sessions", (c) =>
 homeworkRoutes.get("/sessions", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   const profile = await getActiveProfile(c.env.DB, profileId);
-  return c.json(await listHomeworkSessions(c.env.DB, profile.id), 200, {
+  const q = (c.req.query("q") ?? "").trim().toLowerCase();
+  const limitRaw = Number(c.req.query("limit") ?? "20");
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.trunc(limitRaw))) : 20;
+
+  const sessions = await listHomeworkSessions(c.env.DB, profile.id, { limit: q ? 50 : limit });
+  const result = q
+    ? sessions.filter((s) => matchesHomeworkQuery(s, q)).slice(0, limit)
+    : sessions.slice(0, limit);
+
+  return c.json(result, 200, {
     "Accept-Query": SESSIONS_ACCEPT_QUERY,
   });
 });
@@ -386,7 +535,7 @@ homeworkRoutes.on("QUERY", "/sessions", async (c) => {
 
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const allSessions = await listHomeworkSessions(c.env.DB, profile.id);
+  const allSessions = await listHomeworkSessions(c.env.DB, profile.id, { limit: 50 });
   const needle = queryInput.q.toLowerCase();
   const filtered = allSessions
     .filter((session) => matchesHomeworkQuery(session, needle, queryInput.status))
@@ -409,6 +558,39 @@ homeworkRoutes.get("/sessions/:sessionId", async (c) => {
     return c.json({ error: `Homework session not found: ${sessionId}` }, 404);
   }
   return c.json(session);
+});
+
+homeworkRoutes.delete("/sessions/:sessionId", async (c) => {
+  const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
+  const sessionId = Number(c.req.param("sessionId"));
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return c.json({ error: "Invalid sessionId" }, 400);
+  }
+
+  const profile = await getActiveProfile(c.env.DB, profileId);
+  const row = await c.env.DB.prepare(
+    "SELECT id, image_key FROM homework_session WHERE id = ? AND profile_id = ?",
+  )
+    .bind(sessionId, profile.id)
+    .first<{ id: number; image_key: string | null }>();
+
+  if (!row) {
+    return c.json({ error: `Homework session not found: ${sessionId}` }, 404);
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "DELETE FROM homework_message WHERE exercise_id IN (SELECT id FROM homework_exercise WHERE session_id = ?)",
+    ).bind(sessionId),
+    c.env.DB.prepare("DELETE FROM homework_exercise WHERE session_id = ?").bind(sessionId),
+    c.env.DB.prepare("DELETE FROM homework_session WHERE id = ? AND profile_id = ?").bind(
+      sessionId,
+      profile.id,
+    ),
+  ]);
+
+  await deleteUploadedImage(c.env, row.image_key);
+  return c.json({ deleted: true, id: sessionId });
 });
 
 homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/reply", async (c) => {
@@ -484,10 +666,11 @@ const HYDRATE_SCHEMA = {
   type: "OBJECT",
   properties: {
     promptNative: { type: "STRING" },
+    promptEnglish: { type: "STRING" },
     explanationTarget: { type: "STRING" },
     explanationEnglish: { type: "STRING" },
   },
-  required: ["promptNative", "explanationTarget", "explanationEnglish"],
+  required: ["promptNative", "promptEnglish", "explanationTarget", "explanationEnglish"],
 };
 
 homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/hydrate", async (c) => {
@@ -502,19 +685,26 @@ homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/hydrate", async 
     return c.json({ error: `Homework exercise not found: ${exerciseId}` }, 404);
   }
 
-  if (exercise.promptNative && exercise.explanationTarget && exercise.explanationEnglish) {
+  if (
+    exercise.promptNative &&
+    exercise.promptEnglish &&
+    exercise.explanationTarget &&
+    exercise.explanationEnglish
+  ) {
     return c.json(exercise);
   }
 
   const hydrated = await callGeminiStructured<{
     promptNative: string;
+    promptEnglish: string;
     explanationTarget: string;
     explanationEnglish: string;
   }>(c.env, {
     systemPrompt: `You are a warm, Socratic homework tutor for a ${profile.age}-year-old learning ${profile.targetLanguageName} (native: ${profile.nativeLanguageName}).
 ${profile.dialectRules}
-Return concise, kid-friendly spoken text (1-2 short sentences max). NEVER give away the answer.
+Return concise, kid-friendly spoken-only plain prose (<= 25 words each, no markdown). NEVER give away the answer.
 - promptNative: natural ${profile.nativeLanguageName} translation of the exercise question.
+- promptEnglish: natural simple English translation of the exercise question.
 - explanationTarget: short spoken explanation in simple ${profile.targetLanguageName}.
 - explanationEnglish: short spoken explanation in simple English.`,
     userText: `Exercise question (${profile.targetLanguageName}): ${exercise.promptTarget}\nExisting explanation (${profile.nativeLanguageName}): ${exercise.explanationNative}`,
@@ -524,14 +714,102 @@ Return concise, kid-friendly spoken text (1-2 short sentences max). NEVER give a
   await c.env.DB.prepare(
     `UPDATE homework_exercise
        SET prompt_native = COALESCE(prompt_native, ?),
+           prompt_english = COALESCE(prompt_english, ?),
            explanation_target = COALESCE(explanation_target, ?),
            explanation_english = COALESCE(explanation_english, ?)
      WHERE id = ?`,
   )
-    .bind(hydrated.promptNative, hydrated.explanationTarget, hydrated.explanationEnglish, exerciseId)
+    .bind(
+      hydrated.promptNative,
+      hydrated.promptEnglish,
+      hydrated.explanationTarget,
+      hydrated.explanationEnglish,
+      exerciseId,
+    )
     .run();
 
   const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId);
   const updatedExercise = updatedSession?.exercises.find((e) => e.id === exerciseId);
   return c.json(updatedExercise);
+});
+
+const PASSAGE_HYDRATE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    titleTarget: { type: "STRING" },
+    sentences: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          targetText: { type: "STRING" },
+          nativeSummary: { type: "STRING" },
+          englishSummary: { type: "STRING" },
+        },
+        required: ["targetText", "nativeSummary", "englishSummary"],
+      },
+    },
+  },
+  required: ["titleTarget", "sentences"],
+};
+
+homeworkRoutes.post("/sessions/:sessionId/passage/hydrate", async (c) => {
+  const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
+  const sessionId = Number(c.req.param("sessionId"));
+  if (!Number.isInteger(sessionId) || sessionId <= 0) {
+    return c.json({ error: "Invalid sessionId" }, 400);
+  }
+
+  const profile = await getActiveProfile(c.env.DB, profileId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  if (!session) {
+    return c.json({ error: `Homework session not found: ${sessionId}` }, 404);
+  }
+  if (!session.readingPassage || session.readingPassage.sentences.length === 0) {
+    return c.json({ error: "This homework page does not have a reading passage" }, 404);
+  }
+
+  const needsHydration = session.readingPassage.sentences.some(
+    (s) => !s.nativeSummary?.trim() || !s.englishSummary?.trim(),
+  );
+  if (!needsHydration) {
+    return c.json(session.readingPassage);
+  }
+
+  const hydrated = await callGeminiStructured<{
+    titleTarget: string;
+    sentences: Array<{ targetText: string; nativeSummary: string; englishSummary: string }>;
+  }>(c.env, {
+    systemPrompt: `You are a warm children's tutor helping a ${profile.age}-year-old understand a ${profile.targetLanguageName} passage (native: ${profile.nativeLanguageName}).
+${profile.dialectRules}
+For each input sentence, keep \`targetText\` intact and provide concise, kid-friendly spoken translations (<= 25 words, plain prose):
+- nativeSummary (${profile.nativeLanguageName})
+- englishSummary (simple English)`,
+    userText: JSON.stringify({
+      titleTarget: session.readingPassage.titleTarget,
+      sentences: session.readingPassage.sentences.map((s) => s.targetText),
+    }),
+    responseSchema: PASSAGE_HYDRATE_SCHEMA,
+  });
+
+  const mergedSentences: SentenceItem[] = session.readingPassage.sentences.map((orig, idx) => {
+    const match = hydrated.sentences?.[idx];
+    return {
+      targetText: orig.targetText,
+      nativeSummary: orig.nativeSummary?.trim() || match?.nativeSummary?.trim() || "",
+      englishSummary: orig.englishSummary?.trim() || match?.englishSummary?.trim() || "",
+      trickyWords: orig.trickyWords ?? [],
+    };
+  });
+
+  const updatedPassage: HomeworkReadingPassageDto = {
+    titleTarget: session.readingPassage.titleTarget || hydrated.titleTarget?.trim() || session.pageTitle,
+    sentences: mergedSentences,
+  };
+
+  await c.env.DB.prepare("UPDATE homework_session SET reading_passage_json = ? WHERE id = ?")
+    .bind(JSON.stringify(updatedPassage), sessionId)
+    .run();
+
+  return c.json(updatedPassage);
 });

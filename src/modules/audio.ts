@@ -86,9 +86,15 @@ async function computeAudioCacheKey(parts: string[]): Promise<string> {
   return `audio/${hex}.bin`;
 }
 
+const LEGACY_CLOUD_TTS_VOICE = /-(?:Wavenet|Standard|Neural2|Studio|Polyglot|Chirp|Journey)-/i;
+
 function resolveGeminiVoiceName(profileVoice: string | undefined, envVoice: string | undefined): string {
   const candidate = profileVoice?.trim();
-  if (candidate && GEMINI_PREBUILT_VOICES.has(candidate)) {
+  if (
+    candidate &&
+    !LEGACY_CLOUD_TTS_VOICE.test(candidate) &&
+    (GEMINI_PREBUILT_VOICES.has(candidate) || candidate.startsWith("voice_") || candidate.includes("-"))
+  ) {
     return candidate;
   }
   if (envVoice?.trim()) {
@@ -106,20 +112,23 @@ async function synthesizeWithGeminiTts(
     voiceName: string;
     slow: boolean;
   },
-): Promise<{ bytes: Uint8Array; contentType: string } | null> {
-  if (!env.GEMINI_API_KEY) return null;
+): Promise<{ audio: { bytes: Uint8Array; contentType: string } | null; reason?: string }> {
+  if (!env.GEMINI_API_KEY) {
+    return { audio: null, reason: "no-gemini-key" };
+  }
 
   const model = env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
 
+  const dialectNote = params.languageCode.toLowerCase().startsWith("pt")
+    ? " using European Portuguese (Portugal) pronunciation, never Brazilian"
+    : "";
   const style = params.slow
-    ? `Warm, gentle, natural children's reading tutor speaking ${params.targetLanguageName} slowly and clearly, enunciating every syllable for a young learner.`
-    : `Warm, friendly, natural children's reading tutor speaking ${params.targetLanguageName} clearly at a comfortable storytelling pace.`;
+    ? `Warm, gentle, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} slowly and clearly for a young child.`
+    : `Warm, friendly, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} clearly at a comfortable pace.`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const buildPayload = (includeLanguageCode: boolean) =>
+    JSON.stringify({
       contents: [
         {
           role: "user",
@@ -139,14 +148,35 @@ async function synthesizeWithGeminiTts(
               voiceName: params.voiceName,
             },
           },
-          languageCode: params.languageCode,
+          ...(includeLanguageCode ? { languageCode: params.languageCode } : {}),
         },
       },
-    }),
+    });
+
+  let res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: buildPayload(true),
   });
 
   if (!res.ok) {
-    return null;
+    const errText = await res.text().catch(() => "");
+    console.error("Gemini TTS API error:", res.status, errText.slice(0, 400));
+
+    if (res.status >= 400 && res.status < 500) {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: buildPayload(false),
+      });
+      if (!res.ok) {
+        const retryErrText = await res.text().catch(() => "");
+        console.error("Gemini TTS retry error:", res.status, retryErrText.slice(0, 400));
+        return { audio: null, reason: `gemini-tts-${res.status}` };
+      }
+    } else {
+      return { audio: null, reason: `gemini-tts-${res.status}` };
+    }
   }
 
   const body = (await res.json()) as {
@@ -161,7 +191,8 @@ async function synthesizeWithGeminiTts(
 
   const inline = body.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
   if (!inline?.data) {
-    return null;
+    console.error("Gemini TTS returned empty audio payload");
+    return { audio: null, reason: "gemini-tts-empty" };
   }
 
   const rawBytes = decodeBase64(inline.data);
@@ -171,10 +202,10 @@ async function synthesizeWithGeminiTts(
   if (mime.includes("l16") || mime.includes("pcm")) {
     const rateMatch = mime.match(/rate=(\d+)/);
     const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
-    return { bytes: wrapPcm16AsWav(rawBytes, sampleRate), contentType: "audio/wav" };
+    return { audio: { bytes: wrapPcm16AsWav(rawBytes, sampleRate), contentType: "audio/wav" } };
   }
 
-  return { bytes: rawBytes, contentType: mime.split(";")[0] || "audio/wav" };
+  return { audio: { bytes: rawBytes, contentType: mime.split(";")[0] || "audio/wav" } };
 }
 
 async function synthesizeWithGoogleCloudTts(
@@ -204,7 +235,11 @@ async function synthesizeWithGoogleCloudTts(
     },
   );
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error("Google Cloud TTS error:", res.status, errText.slice(0, 300));
+    return null;
+  }
 
   const body = (await res.json()) as { audioContent?: string };
   if (!body.audioContent) return null;
@@ -246,19 +281,25 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     return c.json(
       { error: "No cloud TTS provider configured; use browser speechSynthesis fallback" },
       501,
-      { "Accept-Query": AUDIO_ACCEPT_QUERY },
+      {
+        "Accept-Query": AUDIO_ACCEPT_QUERY,
+        "X-Audio-Fallback-Reason": "no-api-key",
+      },
     );
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
   const languageCode = parsed.data.languageCode || profile.targetLanguageCode;
   const lc = languageCode.toLowerCase();
+  const nativeLc = profile.nativeLanguageCode.toLowerCase();
   const spokenLanguageName =
-    lc === profile.nativeLanguageCode.toLowerCase()
+    lc === nativeLc || lc.startsWith("nb") || lc.startsWith("no") || lc.startsWith("nn")
       ? profile.nativeLanguageName
       : lc.startsWith("en")
         ? "English"
-        : profile.targetLanguageName;
+        : lc.startsWith("pt")
+          ? profile.targetLanguageName
+          : languageCode;
   const geminiVoice = resolveGeminiVoiceName(profile.ttsVoiceName, c.env.GEMINI_TTS_VOICE);
   const cacheKey = await computeAudioCacheKey([
     c.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts",
@@ -277,22 +318,25 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
       const headers = new Headers();
       cached.writeHttpMetadata(headers);
       if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/wav");
+      if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, max-age=2592000");
       headers.set("Accept-Ranges", "bytes");
       headers.set("Accept-Query", AUDIO_ACCEPT_QUERY);
       headers.set("Content-Location", contentLocation);
+      headers.set("X-Audio-Provider", cached.customMetadata?.provider || "gemini-tts");
       headers.set("X-Audio-Cache", "HIT");
       return new Response(cached.body, { status: 200, headers });
     }
   }
 
   // 2. Try Gemini 3.8 Flash-Lite TTS (natural human voice using existing GEMINI_API_KEY)
-  let audio = await synthesizeWithGeminiTts(c.env, {
+  const geminiResult = await synthesizeWithGeminiTts(c.env, {
     text: parsed.data.text,
     languageCode,
     targetLanguageName: spokenLanguageName,
     voiceName: geminiVoice,
     slow: parsed.data.slow,
   });
+  let audio = geminiResult.audio;
   let provider = "gemini-tts";
 
   // 3. Fallback to Google Cloud TTS if configured
@@ -310,13 +354,17 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     return c.json(
       { error: "Cloud TTS unavailable; falling back to device speechSynthesis" },
       501,
-      { "Accept-Query": AUDIO_ACCEPT_QUERY },
+      {
+        "Accept-Query": AUDIO_ACCEPT_QUERY,
+        "X-Audio-Fallback-Reason": geminiResult.reason || "provider-unavailable",
+      },
     );
   }
 
   const responseHeaders: Record<string, string> = {
     "Content-Type": audio.contentType,
     "Content-Length": String(audio.bytes.byteLength),
+    "Cache-Control": "private, max-age=2592000",
     "Accept-Ranges": "bytes",
     "Accept-Query": AUDIO_ACCEPT_QUERY,
     "X-Audio-Provider": provider,
@@ -330,6 +378,9 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
       httpMetadata: {
         contentType: audio.contentType,
         cacheControl: "private, max-age=2592000",
+      },
+      customMetadata: {
+        provider,
       },
     });
     try {

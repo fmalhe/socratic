@@ -1,417 +1,480 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="en" data-theme="light">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="Socratic — Calm, focused multilingual reading and homework tutor for iPad and Android.">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Socratic">
-  <meta name="theme-color" id="meta-theme-color" content="#0A0B0D">
-  <title>Socratic</title>
-  <link rel="icon" type="image/svg+xml" href="/icon.svg">
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Socratic — Reading &amp; Homework Buddy</title>
+  <meta name="theme-color" content="#FAF7F2" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=Nunito:wght@600;700;800;900&display=swap"
+    rel="stylesheet"
+  />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("socratic-theme");
+        var theme = saved === "dark" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", theme);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#131620" : "#FAF7F2");
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header class="top-bar">
-    <div class="top-bar-inner">
+  <header class="app-header">
+    <div class="header-inner">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">🦉</span>
-        <div>
-          <h1 class="brand-title">Socratic</h1>
-          <p class="brand-subtitle" id="learner-subtitle">Loading…</p>
-        </div>
+        <img src="/icon.svg" alt="" class="brand-icon" width="32" height="32" />
+        <span class="brand-name">Socratic</span>
       </div>
 
-      <div class="status-pills" aria-label="Progress and controls">
-        <button class="status-pill status-pill-streak" id="pill-streak" type="button" data-nav="progress" title="Day streak">
-          <span aria-hidden="true">🔥</span>
-          <span class="num" id="header-streak">0</span>
+      <nav class="tab-bar" role="tablist" aria-label="Main learning mode">
+        <button
+          id="tab-homework"
+          class="tab-pill is-active"
+          role="tab"
+          aria-selected="true"
+          type="button"
+        >
+          <span aria-hidden="true">✏️</span>
+          <span>Homework</span>
         </button>
-        <button class="status-pill status-pill-star" id="pill-stars" type="button" data-nav="progress" title="Total stars">
+        <button
+          id="tab-read"
+          class="tab-pill"
+          role="tab"
+          aria-selected="false"
+          type="button"
+        >
+          <span aria-hidden="true">📖</span>
+          <span>Read</span>
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <button id="stars-pill" class="stars-pill" type="button" title="Your Stars &amp; Words" aria-label="Open Stars and Saved Words">
           <span aria-hidden="true">⭐</span>
-          <span class="num" id="header-stars">0</span>
+          <span id="header-stars-count">0</span>
         </button>
-        <button class="icon-pill" id="btn-theme-toggle" type="button" aria-label="Toggle light or dark theme" title="Toggle theme">
-          <svg class="icon" id="theme-icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
-          </svg>
-          <svg class="icon" id="theme-icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
-            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
-          </svg>
+        <button id="theme-toggle" class="icon-btn" type="button" title="Switch light or dark theme" aria-label="Switch theme">
+          <span id="theme-toggle-icon" aria-hidden="true">🌙</span>
         </button>
-        <button class="cmd-trigger" id="btn-cmd-open" type="button" aria-label="Open command menu" title="Quick actions (⌘K)">
-          <span class="kbd">⌘K</span>
+        <button id="settings-btn" class="icon-btn" type="button" title="Parent Settings" aria-label="Parent Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
         </button>
       </div>
     </div>
   </header>
 
-  <div class="app-shell">
-    <nav class="segmented-nav" aria-label="Main navigation">
-      <button class="seg-btn is-active" id="tab-reading" type="button" data-tab="reading">
-        <span class="nav-emoji" aria-hidden="true">📖</span>
-        <span>Read</span>
-      </button>
-      <button class="seg-btn" id="tab-homework" type="button" data-tab="homework">
-        <span class="nav-emoji" aria-hidden="true">✏️</span>
-        <span>Homework</span>
-      </button>
-      <button class="seg-btn" id="tab-progress" type="button" data-tab="progress">
-        <span class="nav-emoji" aria-hidden="true">⭐</span>
-        <span>Stars</span>
-      </button>
-      <button class="seg-btn" id="tab-profile" type="button" data-tab="profile">
-        <span class="nav-emoji" aria-hidden="true">⚙️</span>
-        <span>Settings</span>
-      </button>
-    </nav>
+  <main class="main-shell">
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-    <main class="main-content">
-      <!-- READING VIEW -->
-      <section class="view is-active" id="view-reading" aria-labelledby="tab-reading">
-        <div class="quick-bar">
-          <label class="btn btn-primary btn-sm" for="reading-camera-input" id="btn-reading-camera">
-            <span aria-hidden="true">📸</span>
-            <span>Photo</span>
-          </label>
-          <input id="reading-camera-input" type="file" accept="image/*" capture="environment" hidden>
-
-          <label class="btn btn-secondary btn-sm" for="reading-library-input" id="btn-reading-library">
-            <span aria-hidden="true">🖼️</span>
-            <span>Gallery</span>
-          </label>
-          <input id="reading-library-input" type="file" accept="image/*" hidden>
+    <!-- ===================================================== -->
+    <!-- VIEW 1: HOMEWORK                                      -->
+    <!-- ===================================================== -->
+    <section id="view-homework" class="view-section">
+      <div id="hw-empty-state" class="card empty-hero">
+        <div class="owl-stage" data-owl-state="idle">
+          <div id="hw-hero-owl" class="owl-svg-slot"></div>
         </div>
+        <h1 class="hero-title">Let&rsquo;s do homework together!</h1>
+        <p class="hero-subtitle">Snap a photo of your page and Owly will help you read &amp; understand.</p>
 
-        <div class="progress-card surface" id="reading-loading" hidden>
-          <div class="progress-card-top">
-            <img class="progress-thumb" id="reading-progress-thumb" alt="Page preview" hidden>
-            <div class="progress-meta">
-              <div class="progress-header-row">
-                <span class="progress-stage" id="reading-progress-stage">Preparing photo…</span>
-                <span class="progress-pct num" id="reading-progress-pct">0%</span>
-              </div>
-              <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="reading-progress-bar">
-                <div class="progress-fill" id="reading-progress-fill"></div>
-              </div>
-              <div class="progress-subrow">
-                <span class="progress-steps" id="reading-progress-steps">
-                  <span class="p-step" data-step="optimize">1. Optimize</span>
-                  <span class="p-step" data-step="upload">2. Upload</span>
-                  <span class="p-step" data-step="analyze">3. Analyze</span>
-                </span>
-                <span class="progress-size muted-note" id="reading-progress-size"></span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="error-banner surface" id="reading-error" role="alert" hidden>
-          <div class="error-banner-head">
-            <span class="error-banner-title">Scan failed</span>
-            <div class="error-banner-actions">
-              <button class="btn btn-secondary btn-sm" id="btn-reading-error-copy" type="button">Copy</button>
-              <button class="btn btn-ghost btn-sm" id="btn-reading-error-close" type="button">Dismiss</button>
-            </div>
-          </div>
-          <pre class="error-banner-msg" id="reading-error-msg"></pre>
-        </div>
-
-        <div id="reading-results" hidden>
-          <div class="lyrics-player surface" id="lyrics-player" aria-label="Read along controls">
-            <div class="lyrics-controls">
-              <button class="btn btn-primary btn-sm" id="btn-lyrics-play" type="button">
-                <span id="lyrics-play-icon" aria-hidden="true">▶</span>
-                <span id="lyrics-play-label">Play</span>
-              </button>
-              <button class="btn btn-secondary btn-sm" id="btn-lyrics-stop" type="button" disabled>
-                <span aria-hidden="true">■</span>
-              </button>
-              <button class="btn btn-ghost btn-sm" id="btn-lyrics-prev" type="button" aria-label="Previous sentence" disabled>‹</button>
-              <button class="btn btn-ghost btn-sm" id="btn-lyrics-next" type="button" aria-label="Next sentence" disabled>›</button>
-              <button class="btn btn-secondary btn-sm" id="btn-lyrics-speed" type="button" aria-pressed="false" title="Slow reading">🐢</button>
-              <button class="btn btn-secondary btn-sm" id="btn-reading-photo" type="button" hidden title="View Photo">🖼️</button>
-              <button class="btn btn-success btn-sm" id="btn-finish-reading" type="button">🎉 +10 ⭐</button>
-            </div>
-            <div class="lyrics-status">
-              <span class="lyrics-counter num" id="lyrics-counter"></span>
-              <span class="voice-badge" id="lyrics-voice-badge" hidden>Natural</span>
-            </div>
-          </div>
-
-          <div class="sentence-list" id="reading-sentences"></div>
-        </div>
-      </section>
-
-      <!-- HOMEWORK VIEW -->
-      <section class="view" id="view-homework" aria-labelledby="tab-homework" hidden>
-        <div class="quick-bar">
-          <label class="btn btn-primary btn-sm" for="homework-camera-input" id="btn-homework-camera">
-            <span aria-hidden="true">📸</span>
-            <span>Photo</span>
-          </label>
-          <input id="homework-camera-input" type="file" accept="image/*" capture="environment" hidden>
-
-          <label class="btn btn-secondary btn-sm" for="homework-library-input" id="btn-homework-library">
-            <span aria-hidden="true">🖼️</span>
-            <span>Gallery</span>
-          </label>
-          <input id="homework-library-input" type="file" accept="image/*" hidden>
-
-          <button class="btn btn-secondary btn-sm quick-bar-end" id="btn-hw-pages-toggle" type="button" hidden aria-expanded="false">
+        <input id="hw-file-input" class="visually-hidden" type="file" accept="image/*" />
+        <div class="hero-cta-row">
+          <button id="hw-camera-btn" class="btn btn-primary btn-xl" type="button">
+            <span aria-hidden="true">📷</span>
+            <span>Take a Photo or Pick Page</span>
+          </button>
+          <button id="hw-open-pages-empty" class="btn btn-secondary btn-lg" type="button" hidden>
             <span aria-hidden="true">📚</span>
-            <span id="hw-pages-label">Pages</span>
+            <span>Recent Pages</span>
           </button>
         </div>
+      </div>
 
-        <div class="progress-card surface" id="homework-loading" hidden>
-          <div class="progress-card-top">
-            <img class="progress-thumb" id="homework-progress-thumb" alt="Worksheet preview" hidden>
-            <div class="progress-meta">
-              <div class="progress-header-row">
-                <span class="progress-stage" id="homework-progress-stage">Preparing photo…</span>
-                <span class="progress-pct num" id="homework-progress-pct">0%</span>
-              </div>
-              <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="homework-progress-bar">
-                <div class="progress-fill" id="homework-progress-fill"></div>
-              </div>
-              <div class="progress-subrow">
-                <span class="progress-steps" id="homework-progress-steps">
-                  <span class="p-step" data-step="optimize">1. Optimize</span>
-                  <span class="p-step" data-step="upload">2. Upload</span>
-                  <span class="p-step" data-step="analyze">3. Analyze</span>
-                </span>
-                <span class="progress-size muted-note" id="homework-progress-size"></span>
-              </div>
-            </div>
+      <div id="hw-progress-card" class="card scan-progress-card" hidden>
+        <div class="scan-preview-wrap">
+          <img id="hw-progress-thumb" class="scan-preview-img" alt="Uploaded homework photo" />
+          <div class="scan-beam" aria-hidden="true"></div>
+        </div>
+        <div class="scan-status-col">
+          <div class="owl-mini-slot" data-owl-state="loading"></div>
+          <p id="hw-progress-msg" class="scan-msg">Owly is looking at your page&hellip;</p>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="hw-progress-fill" class="progress-fill" style="width: 18%"></div>
           </div>
+          <button id="hw-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancel</button>
         </div>
+      </div>
 
-        <div class="error-banner surface" id="homework-error" role="alert" hidden>
-          <div class="error-banner-head">
-            <span class="error-banner-title">Scan failed</span>
-            <div class="error-banner-actions">
-              <button class="btn btn-secondary btn-sm" id="btn-homework-error-copy" type="button">Copy</button>
-              <button class="btn btn-ghost btn-sm" id="btn-homework-error-close" type="button">Dismiss</button>
-            </div>
-          </div>
-          <pre class="error-banner-msg" id="homework-error-msg"></pre>
+      <div id="hw-error-card" class="card error-card" hidden>
+        <div class="owl-mini-slot" data-owl-state="idle"></div>
+        <h2 class="error-title">Oops! That photo was tricky to read.</h2>
+        <p class="error-subtitle">Try holding the camera steady in bright light.</p>
+        <div class="error-actions">
+          <button id="hw-error-retry" class="btn btn-primary" type="button">Try Another Photo</button>
+          <button id="hw-error-dismiss" class="btn btn-ghost" type="button">Back</button>
         </div>
+        <details class="error-details">
+          <summary>Details for grown-ups</summary>
+          <code id="hw-error-raw"></code>
+        </details>
+      </div>
 
-        <div class="recent-sessions surface" id="homework-recent-sessions" hidden>
-          <input
-            class="search-input"
-            id="hw-search-input"
-            type="search"
-            placeholder="Search…"
-            aria-label="Search past homework pages"
-          >
-          <div class="session-chips" id="session-chips"></div>
-        </div>
-
-        <div class="homework-workspace" id="homework-workspace" hidden>
-          <div class="homework-toolbar">
-            <div class="exercise-stepper" id="hw-exercise-stepper" role="tablist" aria-label="Exercises"></div>
-            <button class="photo-thumb-btn" id="btn-hw-photo" type="button" hidden aria-label="View scanned worksheet photo">
-              <img id="hw-photo-thumb" alt="Scanned worksheet">
+      <div id="hw-session-stage" class="session-stage" hidden>
+        <div class="workspace-bar">
+          <h2 id="hw-page-title" class="page-title">Homework Page</h2>
+          <div class="workspace-actions">
+            <button id="hw-photo-btn" class="pill-btn" type="button" title="See scanned photo">
+              <span aria-hidden="true">📷</span>
               <span>Photo</span>
+            </button>
+            <button id="hw-pages-btn" class="pill-btn" type="button" title="Open saved pages">
+              <span aria-hidden="true">📚</span>
+              <span>Pages</span>
+            </button>
+            <button id="hw-new-btn" class="pill-btn pill-accent" type="button">
+              <span aria-hidden="true">✨</span>
+              <span>New</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="hw-stepper" class="stepper-bar" role="tablist" aria-label="Page sections"></div>
+
+        <!-- Stage A: Homework Reading Passage -->
+        <div id="hw-passage-stage" class="card passage-card" hidden>
+          <div class="passage-header">
+            <span class="passage-badge">📖 Story &amp; Text</span>
+            <h3 id="hw-passage-title" class="passage-title"></h3>
+          </div>
+          <div id="hw-passage-sentences" class="karaoke-sentence-list"></div>
+        </div>
+
+        <!-- Stage B: Individual Exercise -->
+        <div id="hw-exercise-stage" class="exercise-stage" hidden>
+          <div class="card question-hero-card">
+            <div class="question-top-row">
+              <span id="hw-question-badge" class="question-badge">Question 1</span>
+              <span id="hw-question-done-badge" class="done-badge" hidden>✓ Done!</span>
+            </div>
+
+            <div id="hw-question-karaoke" class="karaoke-prompt" dir="auto"></div>
+
+            <div class="question-audio-bar">
+              <button id="hw-q-listen-pt" class="listen-hero-btn" type="button">
+                <span class="flag-slot" data-flag="pt"></span>
+                <span id="hw-q-listen-pt-label">Listen</span>
+                <span class="btn-spinner" hidden></span>
+                <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+              </button>
+
+              <button
+                id="hw-q-slow-toggle"
+                class="slow-pill"
+                type="button"
+                aria-pressed="false"
+                title="Read slower"
+              >
+                <span aria-hidden="true">🐢</span>
+                <span>Slow</span>
+              </button>
+
+              <div class="question-flag-pair">
+                <button
+                  id="hw-q-listen-no"
+                  class="flag-icon-btn"
+                  type="button"
+                  title="Hear question in Norwegian"
+                  aria-label="Hear question in Norwegian"
+                >
+                  <span class="flag-slot" data-flag="no"></span>
+                  <span class="btn-spinner" hidden></span>
+                  <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+                </button>
+                <button
+                  id="hw-q-listen-gb"
+                  class="flag-icon-btn"
+                  type="button"
+                  title="Hear question in English"
+                  aria-label="Hear question in English"
+                >
+                  <span class="flag-slot" data-flag="gb"></span>
+                  <span class="btn-spinner" hidden></span>
+                  <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+                </button>
+              </div>
+            </div>
+
+            <div id="hw-tricky-words" class="tricky-words-row" hidden></div>
+          </div>
+
+          <!-- Audio-First Owl Helper Dock (ZERO explanation text walls) -->
+          <div id="hw-owl-dock" class="card owl-helper-dock">
+            <div class="owl-dock-top">
+              <div id="hw-owl-svg" class="owl-dock-avatar" data-owl-state="idle"></div>
+              <div class="owl-dock-copy">
+                <span class="owl-dock-title">Tap a flag to hear Owly explain!</span>
+              </div>
+            </div>
+
+            <div class="flag-dock-grid">
+              <button id="hw-explain-pt" class="flag-dock-btn" type="button" data-lang="pt-PT">
+                <span class="flag-slot" data-flag="pt"></span>
+                <span class="flag-label">Português</span>
+                <span class="btn-spinner" hidden></span>
+                <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+              </button>
+              <button id="hw-explain-no" class="flag-dock-btn" type="button" data-lang="nb-NO">
+                <span class="flag-slot" data-flag="no"></span>
+                <span class="flag-label">Norsk</span>
+                <span class="btn-spinner" hidden></span>
+                <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+              </button>
+              <button id="hw-explain-gb" class="flag-dock-btn" type="button" data-lang="en-US">
+                <span class="flag-slot" data-flag="gb"></span>
+                <span class="flag-label">English</span>
+                <span class="btn-spinner" hidden></span>
+                <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="kid-action-row">
+            <button id="hw-chat-toggle" class="btn btn-secondary" type="button" aria-expanded="false">
+              <span aria-hidden="true">💬</span>
+              <span>Ask Owly</span>
+            </button>
+            <button id="hw-complete-btn" class="btn btn-celebrate" type="button">
+              <span aria-hidden="true">⭐</span>
+              <span>I finished this!</span>
             </button>
           </div>
 
-          <article class="surface exercise-surface" id="hw-text-card" hidden>
-            <div class="exercise-header">
-              <span class="exercise-title">📖 Page Text</span>
-              <div class="audio-row">
-                <button class="btn btn-primary btn-sm" id="btn-hw-text-listen" type="button" aria-label="Read page text">
-                  <span class="flag-emoji" id="flag-hw-text">🇵🇹</span>
-                  <span aria-hidden="true">🔊</span>
-                </button>
-                <button class="btn btn-secondary btn-sm" id="btn-hw-text-slow" type="button" aria-label="Read page text slowly" title="Slow">🐢</button>
-              </div>
+          <div id="hw-chat-drawer" class="card chat-drawer" hidden>
+            <div id="hw-chat-messages" class="chat-messages"></div>
+            <div class="chat-quick-chips">
+              <button class="quick-chip" type="button" data-msg="Jeg trenger et lite hint">Jeg trenger et hint</button>
+              <button class="quick-chip" type="button" data-msg="Hva betyr dette?">Hva betyr dette?</button>
             </div>
-            <div class="hw-text-body" id="hw-page-text"></div>
-          </article>
-
-          <article class="surface exercise-surface" id="hw-active-exercise">
-            <div class="exercise-header">
-              <span class="exercise-title" id="hw-ex-badge">Exercise 1</span>
-              <span class="status-badge" id="hw-ex-status" hidden>⭐ Done!</span>
-            </div>
-
-            <div class="exercise-prompt">
-              <p class="reading-text" id="hw-ex-target"></p>
-              <div class="audio-row">
-                <button class="btn btn-primary btn-sm" id="btn-hw-listen" type="button" aria-label="Listen in Portuguese">
-                  <span class="flag-emoji" id="flag-q-target">🇵🇹</span>
-                  <span aria-hidden="true">🔊</span>
-                </button>
-                <button class="btn btn-secondary btn-sm" id="btn-hw-slow" type="button" aria-label="Listen slowly" title="Slow">🐢</button>
-                <button class="btn btn-secondary btn-sm" id="btn-hw-listen-native" type="button" aria-label="Listen in Norwegian">
-                  <span class="flag-emoji" id="flag-q-native">🇳🇴</span>
-                  <span aria-hidden="true">🔊</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="tricky-words-row" id="hw-ex-words"></div>
-
-            <div class="audio-hint-strip" id="hw-audio-hints">
-              <span class="audio-hint-label">💡 Explain</span>
-              <div class="audio-hint-buttons">
-                <button class="hint-flag-btn" id="btn-exp-native" type="button" aria-label="Explain in Norwegian">
-                  <span class="flag-emoji" id="flag-exp-native">🇳🇴</span>
-                  <span aria-hidden="true">🔊</span>
-                </button>
-                <button class="hint-flag-btn" id="btn-exp-target" type="button" aria-label="Explain in Portuguese">
-                  <span class="flag-emoji" id="flag-exp-target">🇵🇹</span>
-                  <span aria-hidden="true">🔊</span>
-                </button>
-                <button class="hint-flag-btn" id="btn-exp-english" type="button" aria-label="Explain in English">
-                  <span class="flag-emoji">🇬🇧</span>
-                  <span aria-hidden="true">🔊</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="exercise-footer">
-              <button class="btn btn-success btn-sm" id="btn-hw-complete" type="button">🎉 Done!</button>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <!-- PROGRESS VIEW -->
-      <section class="view" id="view-progress" aria-labelledby="progress-heading" hidden>
-        <h2 class="view-title" id="progress-heading">Progress</h2>
-
-        <div class="stats-grid">
-          <div class="surface stat-card">
-            <span class="eyebrow">Stars</span>
-            <span class="stat-value num" id="stat-stars">0</span>
-          </div>
-          <div class="surface stat-card">
-            <span class="eyebrow">Day Streak</span>
-            <span class="stat-value num" id="stat-streak">0</span>
-          </div>
-          <div class="surface stat-card">
-            <span class="eyebrow">Pages Read</span>
-            <span class="stat-value num" id="stat-pages">0</span>
+            <form id="hw-chat-form" class="chat-form">
+              <input
+                id="hw-chat-input"
+                class="chat-input"
+                type="text"
+                placeholder="Write a message to Owly&hellip;"
+                autocomplete="off"
+              />
+              <button id="hw-chat-send" class="btn btn-primary" type="submit">Send</button>
+            </form>
           </div>
         </div>
+      </div>
+    </section>
 
-        <div class="surface section-surface">
-          <div class="section-bar">
-            <h3>Saved Tricky Words</h3>
-            <span class="muted-note">Tap any word to hear it slowly</span>
-          </div>
-          <div class="word-shelf" id="saved-words-shelf"></div>
+    <!-- ===================================================== -->
+    <!-- VIEW 2: READ MODE                                     -->
+    <!-- ===================================================== -->
+    <section id="view-read" class="view-section" hidden>
+      <div id="read-empty-state" class="card empty-hero">
+        <div class="owl-stage" data-owl-state="idle">
+          <div id="read-hero-owl" class="owl-svg-slot"></div>
         </div>
-      </section>
+        <h1 class="hero-title">Read a Portuguese book!</h1>
+        <p class="hero-subtitle">Snap any page and listen word by word at your own pace.</p>
 
-      <!-- PROFILE / SETTINGS VIEW -->
-      <section class="view" id="view-profile" aria-labelledby="profile-heading" hidden>
-        <h2 class="view-title" id="profile-heading">Learner Settings</h2>
+        <input id="read-file-input" class="visually-hidden" type="file" accept="image/*" />
+        <button id="read-camera-btn" class="btn btn-primary btn-xl" type="button">
+          <span aria-hidden="true">📖</span>
+          <span>Scan a Book Page</span>
+        </button>
+      </div>
 
-        <form class="surface section-surface" id="profile-form">
-          <div class="form-grid">
-            <label class="field">
-              <span>Learner Name</span>
-              <input id="prof-name" type="text" required>
-            </label>
-            <label class="field">
-              <span>Age (3–18)</span>
-              <input id="prof-age" type="number" min="3" max="18" required>
-            </label>
-            <label class="field">
-              <span>Target Language Code</span>
-              <input id="prof-target-code" type="text" placeholder="pt-PT" required>
-            </label>
-            <label class="field">
-              <span>Target Language Name</span>
-              <input id="prof-target-name" type="text" placeholder="European Portuguese" required>
-            </label>
-            <label class="field">
-              <span>Native Language Code</span>
-              <input id="prof-native-code" type="text" placeholder="nb-NO" required>
-            </label>
-            <label class="field">
-              <span>Native Language Name</span>
-              <input id="prof-native-name" type="text" placeholder="Norwegian" required>
-            </label>
-            <label class="field field-full">
-              <span>Voice Name (Natural Gemini voices: Sulafat, Kore, Aoede, Leda, Puck)</span>
-              <input id="prof-tts-voice" type="text" placeholder="Sulafat" required>
-            </label>
-            <label class="field field-full">
-              <span>Dialect &amp; Tutoring Rules</span>
-              <textarea id="prof-dialect-rules" rows="4" required></textarea>
-            </label>
+      <div id="read-progress-card" class="card scan-progress-card" hidden>
+        <div class="scan-preview-wrap">
+          <img id="read-progress-thumb" class="scan-preview-img" alt="Uploaded book photo" />
+          <div class="scan-beam" aria-hidden="true"></div>
+        </div>
+        <div class="scan-status-col">
+          <div class="owl-mini-slot" data-owl-state="loading"></div>
+          <p id="read-progress-msg" class="scan-msg">Owly is reading your book page&hellip;</p>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="read-progress-fill" class="progress-fill" style="width: 18%"></div>
           </div>
-          <div class="form-actions">
-            <button class="btn btn-primary" id="btn-save-profile" type="submit">Save Changes</button>
+          <button id="read-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <div id="read-error-card" class="card error-card" hidden>
+        <div class="owl-mini-slot" data-owl-state="idle"></div>
+        <h2 class="error-title">Oops! That page didn&rsquo;t quite come through.</h2>
+        <p class="error-subtitle">Try holding the camera steady in bright light.</p>
+        <div class="error-actions">
+          <button id="read-error-retry" class="btn btn-primary" type="button">Try Again</button>
+          <button id="read-error-dismiss" class="btn btn-ghost" type="button">Back</button>
+        </div>
+        <details class="error-details">
+          <summary>Details for grown-ups</summary>
+          <code id="read-error-raw"></code>
+        </details>
+      </div>
+
+      <div id="read-stage" class="session-stage" hidden>
+        <div class="workspace-bar">
+          <h2 class="page-title">Book Page</h2>
+          <div class="workspace-actions">
+            <button id="read-photo-btn" class="pill-btn" type="button">
+              <span aria-hidden="true">📷</span>
+              <span>Photo</span>
+            </button>
+            <button id="read-new-btn" class="pill-btn" type="button">
+              <span aria-hidden="true">✨</span>
+              <span>New Page</span>
+            </button>
+            <button id="read-finish-btn" class="pill-btn pill-celebrate" type="button">
+              <span aria-hidden="true">⭐</span>
+              <span>Finish</span>
+            </button>
           </div>
-        </form>
-      </section>
-    </main>
+        </div>
+
+        <div id="read-sentences" class="card karaoke-sentence-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Sticky Bottom Floating Glass Audio Dock (Read Mode + Homework Passage) -->
+  <div id="floating-audio-dock" class="floating-audio-dock" hidden>
+    <div class="dock-inner">
+      <button id="dock-slow-btn" class="slow-pill" type="button" aria-pressed="false" title="Read slower">
+        <span aria-hidden="true">🐢</span>
+      </button>
+      <button id="dock-prev-btn" class="dock-nav-btn" type="button" aria-label="Previous sentence" title="Previous">⏮</button>
+      <button id="dock-play-btn" class="dock-play-btn" type="button" aria-label="Play or Pause">
+        <span id="dock-play-icon">▶</span>
+        <span class="btn-spinner" hidden></span>
+      </button>
+      <button id="dock-stop-btn" class="dock-nav-btn" type="button" aria-label="Stop reading" title="Stop">⏹</button>
+      <button id="dock-next-btn" class="dock-nav-btn" type="button" aria-label="Next sentence" title="Next">⏭</button>
+      <span id="dock-status-label" class="dock-status-label">1 / 1</span>
+    </div>
   </div>
 
-  <!-- Word Hint Sheet Dialog -->
-  <dialog class="word-dialog" id="word-dialog">
-    <div class="word-dialog-body">
-      <div class="word-dialog-syllables" id="dialog-syllables"></div>
-      <div class="word-dialog-word" id="dialog-word"></div>
-      <p class="word-dialog-hint" id="dialog-hint"></p>
-      <div class="word-dialog-actions">
-        <button class="btn btn-primary btn-sm" id="btn-dialog-slow" type="button">🐢 Slow</button>
-        <button class="btn btn-secondary btn-sm" id="btn-dialog-normal" type="button">🔊 Normal</button>
-        <button class="btn btn-ghost btn-sm" id="btn-dialog-close" type="button">Done</button>
+  <!-- Slide-over Drawer: Visual Recent Pages -->
+  <div id="pages-drawer" class="modal-backdrop" hidden>
+    <div class="drawer-sheet" role="dialog" aria-modal="true" aria-labelledby="pages-drawer-title">
+      <div class="modal-header">
+        <h2 id="pages-drawer-title" class="modal-title">📚 Recent Pages</h2>
+        <button id="pages-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
       </div>
+      <div id="pages-search-wrap" class="pages-search-wrap" hidden>
+        <input id="pages-search-input" class="chat-input" type="search" placeholder="Search pages&hellip;" />
+      </div>
+      <div id="pages-list" class="pages-grid"></div>
     </div>
-  </dialog>
+  </div>
 
-  <!-- Scanned Page Photo Lightbox -->
-  <dialog class="photo-dialog" id="photo-dialog">
-    <div class="photo-dialog-bar">
-      <span class="photo-dialog-title">Scanned Page</span>
-      <button class="btn btn-secondary btn-sm" id="btn-photo-close" type="button">Close</button>
+  <!-- Modal: Stars & Word Bank -->
+  <div id="stars-modal" class="modal-backdrop" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stars-modal-title">
+      <div class="modal-header">
+        <h2 id="stars-modal-title" class="modal-title">⭐ My Stars &amp; Words</h2>
+        <button id="stars-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="stars-stats-grid">
+        <div class="stat-tile stat-gold">
+          <div class="stat-value" id="modal-stars-val">0</div>
+          <div class="stat-label">Stars ⭐</div>
+        </div>
+        <div class="stat-tile stat-flame">
+          <div class="stat-value" id="modal-streak-val">0</div>
+          <div class="stat-label">Day Streak 🔥</div>
+        </div>
+        <div class="stat-tile stat-cobalt">
+          <div class="stat-value" id="modal-pages-val">0</div>
+          <div class="stat-label">Pages Read 📖</div>
+        </div>
+      </div>
+      <h3 class="subhead">Tricky Words (tap to hear!)</h3>
+      <div id="saved-words-list" class="saved-words-grid"></div>
     </div>
-    <div class="photo-dialog-frame">
-      <img id="photo-dialog-img" alt="Scanned page full view">
-    </div>
-  </dialog>
+  </div>
 
-  <!-- Raycast-style Command Palette -->
-  <dialog class="cmd-dialog" id="cmd-dialog" aria-label="Command palette">
-    <div class="cmd-header">
-      <svg class="icon cmd-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-      </svg>
-      <input
-        class="cmd-input"
-        id="cmd-input"
-        type="text"
-        placeholder="Type a command or jump to…"
-        autocomplete="off"
-        spellcheck="false"
-      >
-      <span class="kbd">ESC</span>
+  <!-- Modal: Photo Lightbox -->
+  <div id="photo-modal" class="modal-backdrop" hidden>
+    <div class="modal-card modal-photo-card" role="dialog" aria-modal="true" aria-label="Scanned page photo">
+      <div class="modal-header">
+        <h2 class="modal-title">📷 Scanned Page</h2>
+        <button id="photo-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <img id="photo-modal-img" class="photo-lightbox-img" alt="Scanned homework or book page" />
     </div>
-    <div class="cmd-list" id="cmd-list" role="listbox"></div>
-    <div class="cmd-footer">
-      <span><span class="kbd">↑</span> <span class="kbd">↓</span> Navigate</span>
-      <span><span class="kbd">↵</span> Run</span>
+  </div>
+
+  <!-- Modal: Discreet Parent Settings -->
+  <div id="settings-modal" class="modal-backdrop" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div class="modal-header">
+        <h2 id="settings-modal-title" class="modal-title">Parent Settings</h2>
+        <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <p class="settings-note">Grown-up controls for language rules, learner profile, and voice selection.</p>
+      <form id="settings-form" class="settings-form">
+        <div class="settings-row-2">
+          <label class="field-label">
+            Child&rsquo;s Name
+            <input id="set-name" class="chat-input" type="text" required />
+          </label>
+          <label class="field-label">
+            Age
+            <input id="set-age" class="chat-input" type="number" min="4" max="16" required />
+          </label>
+        </div>
+        <div class="settings-row-2">
+          <label class="field-label">
+            Target Language
+            <input id="set-target-code" class="chat-input" type="text" required />
+          </label>
+          <label class="field-label">
+            Native Language
+            <input id="set-native-code" class="chat-input" type="text" required />
+          </label>
+        </div>
+        <label class="field-label">
+          AI Tutor Voice (Gemini)
+          <input id="set-voice" class="chat-input" type="text" placeholder="Sulafat" required />
+        </label>
+        <label class="field-label">
+          Dialect &amp; Tutoring Rules
+          <textarea id="set-dialect" class="chat-input" rows="3" required></textarea>
+        </label>
+        <div class="settings-footer">
+          <button class="btn btn-primary" type="submit">Save Settings</button>
+        </div>
+      </form>
     </div>
-  </dialog>
+  </div>
 
-  <div class="confetti-layer" id="confetti-layer" aria-hidden="true"></div>
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <!-- Lightweight Word Syllable Popover + Confetti -->
+  <div id="word-popover" class="word-popover" hidden>
+    <strong id="word-popover-syllables"></strong>
+    <span id="word-popover-hint"></span>
+  </div>
+  <div id="confetti-layer" class="confetti-layer" aria-hidden="true"></div>
 
-  <script type="module" src="/app.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>

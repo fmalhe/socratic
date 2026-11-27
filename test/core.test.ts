@@ -200,4 +200,314 @@ describe("Worker HTTP routes", () => {
     );
     expect(badMediaSessions.status).toBe(415);
   });
+
+  it("validates image MIME type and 12 MB limit on scan endpoints", async () => {
+    const form = new FormData();
+    form.append("image", new File(["hello"], "notes.txt", { type: "text/plain" }));
+
+    const res = await app.request(
+      "/api/reading/scan",
+      { method: "POST", body: form },
+      makeEnv(),
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("unsupported file type");
+  });
+
+  it("serves HTTP 206 Partial Content and 416 for R2 upload Range requests", async () => {
+    const payload = new Uint8Array([10, 20, 30, 40, 50, 60]);
+    const mockBucket = {
+      get: async (_key: string, opts?: { range?: { offset?: number; length?: number; suffix?: number } }) => {
+        const start = opts?.range?.offset ?? 0;
+        const slice =
+          opts?.range?.suffix !== undefined
+            ? payload.slice(Math.max(0, payload.length - opts.range.suffix))
+            : opts?.range?.length !== undefined
+              ? payload.slice(start, start + opts.range.length)
+              : payload.slice(start);
+        return {
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(slice);
+              controller.close();
+            },
+          }),
+          size: payload.length,
+          range: opts?.range,
+          httpEtag: '"etag-1"',
+          writeHttpMetadata: (h: Headers) => h.set("Content-Type", "audio/wav"),
+          arrayBuffer: async () => payload.buffer,
+        };
+      },
+    } as unknown as R2Bucket;
+
+    const partial = await app.request(
+      "/api/uploads/audio/clip.bin",
+      { headers: { Range: "bytes=1-3" } },
+      makeEnv({ UPLOADS: mockBucket }),
+    );
+    expect(partial.status).toBe(206);
+    expect(partial.headers.get("Accept-Ranges")).toBe("bytes");
+    expect(partial.headers.get("Content-Range")).toBe("bytes 1-3/6");
+    expect(Array.from(new Uint8Array(await partial.arrayBuffer()))).toEqual([20, 30, 40]);
+
+    const invalid = await app.request(
+      "/api/uploads/audio/clip.bin",
+      { headers: { Range: "bytes=99-120" } },
+      makeEnv({ UPLOADS: mockBucket }),
+    );
+    expect(invalid.status).toBe(416);
+  });
+
+  it("sends thinkingLevel LOW and skips thought parts in callGeminiStructured", async () => {
+    const originalFetch = globalThis.fetch;
+    let capturedBody: { generationConfig?: { thinkingConfig?: { thinkingLevel?: string } } } | undefined;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedBody = JSON.parse(String(init?.body ?? "{}")) as { generationConfig?: { thinkingConfig?: { thinkingLevel?: string } } };
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "internal reasoning", thought: true },
+                  { text: '{"reply":"ok"}' },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const { callGeminiStructured } = await import("../src/lib/gemini");
+      const out = await callGeminiStructured<{ reply: string }>(makeEnv(), {
+        systemPrompt: "sys",
+        userText: "usr",
+        responseSchema: { type: "OBJECT" },
+      });
+      expect(out).toEqual({ reply: "ok" });
+      expect(capturedBody?.generationConfig?.thinkingConfig?.thinkingLevel).toBe("LOW");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("retries Gemini TTS without languageCode on 400 and caches with X-Audio-Provider", async () => {
+    const r2Store = new Map<string, { bytes: Uint8Array; customMetadata?: Record<string, string> }>();
+    const mockDb = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({
+            id: 1,
+            name: "Sofia",
+            age: 8,
+            target_language_code: "pt-PT",
+            target_language_name: "European Portuguese",
+            native_language_code: "nb-NO",
+            native_language_name: "Norwegian",
+            dialect_rules: "PT-PT",
+            tts_voice_name: "pt-PT-Wavenet-A",
+          }),
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const mockBucket = {
+      get: async (key: string) => {
+        const entry = r2Store.get(key);
+        if (!entry) return null;
+        return {
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(entry.bytes);
+              c.close();
+            },
+          }),
+          customMetadata: entry.customMetadata,
+          writeHttpMetadata: (h: Headers) => {
+            h.set("Content-Type", "audio/wav");
+            h.set("Cache-Control", "private, max-age=2592000");
+          },
+        };
+      },
+      put: async (key: string, val: Uint8Array, opts?: { customMetadata?: Record<string, string> }) => {
+        r2Store.set(key, { bytes: new Uint8Array(val), customMetadata: opts?.customMetadata });
+      },
+    } as unknown as R2Bucket;
+
+    const fetchCalls: Array<Record<string, unknown>> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const parsed = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      fetchCalls.push(parsed);
+      if (fetchCalls.length === 1) {
+        return new Response(JSON.stringify({ error: { message: "languageCode unsupported" } }), { status: 400 });
+      }
+      const pcmBase64 = btoa(String.fromCharCode(1, 0, 2, 0));
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [{ inlineData: { mimeType: "audio/l16;rate=24000", data: pcmBase64 } }],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const env = makeEnv({ DB: mockDb, UPLOADS: mockBucket });
+      const miss = await app.request(
+        "/api/audio/speak",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "Olá!", languageCode: "pt-PT", slow: false }),
+        },
+        env,
+      );
+      expect(miss.status).toBe(200);
+      expect(miss.headers.get("X-Audio-Cache")).toBe("MISS");
+      expect(miss.headers.get("X-Audio-Provider")).toBe("gemini-tts");
+      expect(miss.headers.get("Cache-Control")).toContain("max-age");
+      expect(fetchCalls).toHaveLength(2);
+      const firstVoice = (fetchCalls[0] as { generationConfig?: { speechConfig?: { voiceConfig?: { prebuiltVoiceConfig?: { voiceName?: string } } } } }).generationConfig?.speechConfig?.voiceConfig?.prebuiltVoiceConfig?.voiceName;
+      expect(firstVoice).toBe("Sulafat");
+      expect((fetchCalls[1] as { generationConfig?: { speechConfig?: { languageCode?: string } } }).generationConfig?.speechConfig?.languageCode).toBeUndefined();
+
+      const hit = await app.request(
+        "/api/audio/speak",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "Olá!", languageCode: "pt-PT", slow: false }),
+        },
+        env,
+      );
+      expect(hit.status).toBe(200);
+      expect(hit.headers.get("X-Audio-Cache")).toBe("HIT");
+      expect(hit.headers.get("X-Audio-Provider")).toBe("gemini-tts");
+      expect(fetchCalls).toHaveLength(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("derives readingPassage fallback for legacy sessions, filters by ?q=, deletes R2 image, and deduplicates saved words", async () => {
+    const deletedKeys: string[] = [];
+    const sessions = [
+      {
+        id: 1,
+        profile_id: 1,
+        page_title: null,
+        page_summary_native: "En tekst om katten",
+        page_text_target: "O gato dorme. O cão brinca.",
+        reading_passage_json: null,
+        image_key: "homework/old-page.jpg",
+        created_at: "2026-11-26T10:00:00Z",
+      },
+    ];
+    const savedWords = [{ w: "borboleta" }];
+    const insertedWords: string[] = [];
+
+    const mockDb = {
+      prepare: (sql: string) => ({
+        bind: (...args: unknown[]) => ({
+          _sql: sql,
+          _args: args,
+          first: async () => {
+            if (sql.includes("FROM learner_profile")) {
+              return {
+                id: 1,
+                name: "Sofia",
+                age: 8,
+                target_language_code: "pt-PT",
+                target_language_name: "European Portuguese",
+                native_language_code: "nb-NO",
+                native_language_name: "Norwegian",
+                dialect_rules: "PT-PT",
+                tts_voice_name: "Sulafat",
+              };
+            }
+            if (sql.includes("FROM homework_session WHERE id")) {
+              return sessions.find((s) => s.id === Number(args[0])) ?? null;
+            }
+            if (sql.includes("FROM child_progress")) {
+              return { profile_id: 1, total_stars: 5, current_streak_days: 1, last_activity_date: "2026-11-26", pages_read_count: 1 };
+            }
+            return null;
+          },
+          all: async () => {
+            if (sql.includes("FROM homework_session")) return { results: [...sessions] };
+            if (sql.includes("FROM homework_exercise")) return { results: [] };
+            if (sql.includes("FROM homework_message")) return { results: [] };
+            if (sql.includes("SELECT LOWER(word)")) return { results: savedWords };
+            if (sql.includes("FROM saved_word")) return { results: [] };
+            return { results: [] };
+          },
+          run: async () => ({ meta: { last_row_id: 1 } }),
+        }),
+      }),
+      batch: async (stmts: Array<{ _sql?: string; _args?: unknown[] }>) => {
+        for (const st of stmts) {
+          if (st._sql?.includes("INSERT INTO saved_word") && typeof st._args?.[1] === "string") {
+            insertedWords.push(st._args[1]);
+          }
+          if (st._sql?.includes("DELETE FROM homework_session")) {
+            const idx = sessions.findIndex((s) => s.id === Number(st._args?.[0]));
+            if (idx >= 0) sessions.splice(idx, 1);
+          }
+        }
+        return [];
+      },
+    } as unknown as D1Database;
+
+    const mockBucket = {
+      delete: async (key: string) => {
+        deletedKeys.push(key);
+      },
+    } as unknown as R2Bucket;
+
+    const env = makeEnv({ DB: mockDb, UPLOADS: mockBucket });
+
+    const listRes = await app.request("/api/homework/sessions?q=gato&limit=5", {}, env);
+    expect(listRes.status).toBe(200);
+    const listed = (await listRes.json()) as Array<{
+      pageTitle: string;
+      readingPassage: { sentences: Array<{ targetText: string }> } | null;
+    }>;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.pageTitle).toBe("O gato dorme");
+    expect(listed[0]?.readingPassage?.sentences.map((s) => s.targetText)).toEqual([
+      "O gato dorme.",
+      "O cão brinca.",
+    ]);
+
+    const completeRes = await app.request(
+      "/api/progress/complete",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activityType: "HOMEWORK",
+          starsEarned: 2,
+          trickyWords: ["Borboleta", "tartaruga", "Tartaruga"],
+        }),
+      },
+      env,
+    );
+    expect(completeRes.status).toBe(200);
+    expect(insertedWords).toEqual(["tartaruga"]);
+
+    const delRes = await app.request("/api/homework/sessions/1", { method: "DELETE" }, env);
+    expect(delRes.status).toBe(200);
+    expect(deletedKeys).toEqual(["homework/old-page.jpg"]);
+  });
 });

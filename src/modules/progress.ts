@@ -94,15 +94,24 @@ progressRoutes.post("/complete", async (c) => {
     ).bind(profile.id, nextStars, nextStreak, todayIso, nextPages),
   ];
 
+  const existingRows = await c.env.DB.prepare(
+    "SELECT LOWER(word) AS w FROM saved_word WHERE profile_id = ?",
+  )
+    .bind(profile.id)
+    .all<{ w: string }>();
+  const seen = new Set(existingRows.results.map((r) => r.w));
+
   for (const raw of parsed.data.trickyWords) {
     const word = raw.trim();
-    if (word) {
-      statements.push(
-        c.env.DB.prepare(
-          "INSERT INTO saved_word (profile_id, word, language_code) VALUES (?, ?, ?)",
-        ).bind(profile.id, word, profile.targetLanguageCode),
-      );
-    }
+    if (!word) continue;
+    const key = word.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    statements.push(
+      c.env.DB.prepare(
+        "INSERT INTO saved_word (profile_id, word, language_code) VALUES (?, ?, ?)",
+      ).bind(profile.id, word, profile.targetLanguageCode),
+    );
   }
 
   await c.env.DB.batch(statements);

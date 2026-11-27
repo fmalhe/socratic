@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import { callGeminiStructured, fileToInlineImage, renderReadingSystemPrompt } from "../lib/gemini";
+import { arrayBufferToInlineImage, callGeminiStructured, renderReadingSystemPrompt } from "../lib/gemini";
 import type { Env, ReadingPageResponse } from "../types";
 import { getActiveProfile, resolveProfileId } from "./profile";
-import { storeUploadedImage } from "./uploads";
+import { storeUploadedImage, validateImageUpload } from "./uploads";
 
 const READING_SCHEMA = {
   type: "OBJECT",
@@ -15,6 +15,7 @@ const READING_SCHEMA = {
         properties: {
           targetText: { type: "STRING" },
           nativeSummary: { type: "STRING" },
+          englishSummary: { type: "STRING" },
           trickyWords: {
             type: "ARRAY",
             items: {
@@ -28,7 +29,7 @@ const READING_SCHEMA = {
             },
           },
         },
-        required: ["targetText", "nativeSummary", "trickyWords"],
+        required: ["targetText", "nativeSummary", "englishSummary", "trickyWords"],
       },
     },
   },
@@ -41,15 +42,12 @@ readingRoutes.post("/scan", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   const form = await c.req.formData();
   const image = form.get("image");
-  if (!(image instanceof File) || image.size === 0) {
-    return c.json({ error: "Image file must not be empty" }, 400);
-  }
+  validateImageUpload(image);
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const [inlineImage, stored] = await Promise.all([
-    fileToInlineImage(image),
-    storeUploadedImage(c.env, image, "reading"),
-  ]);
+  const buffer = await image.arrayBuffer();
+  const inlineImage = arrayBufferToInlineImage(buffer, image.type || "image/jpeg");
+  const stored = await storeUploadedImage(c.env, image, "reading", buffer);
 
   const response = await callGeminiStructured<ReadingPageResponse>(c.env, {
     systemPrompt: renderReadingSystemPrompt(profile),
