@@ -167,15 +167,17 @@ async function fetchGeminiTtsWithFallback(
     slow: boolean;
   },
 ): Promise<{ res: Response | null; status: number }> {
-  const query =
+  const url =
     params.method === "streamGenerateContent"
-      ? `alt=sse&key=${encodeURIComponent(env.GEMINI_API_KEY)}`
-      : `key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(params.model)}:${params.method}?${query}`;
+      ? `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(params.model)}:${params.method}?alt=sse`
+      : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(params.model)}:${params.method}`;
 
   let res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": env.GEMINI_API_KEY,
+    },
     body: buildGeminiTtsRequestBody({
       ...params,
       includeLanguageCode: true,
@@ -188,7 +190,10 @@ async function fetchGeminiTtsWithFallback(
     console.error("Gemini TTS API error:", res.status, errText.slice(0, 400));
     res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY,
+      },
       body: buildGeminiTtsRequestBody({
         ...params,
         includeLanguageCode: false,
@@ -327,6 +332,21 @@ function stripWavHeaderIfPresent(bytes: Uint8Array): Uint8Array {
   return bytes;
 }
 
+function resolveCloudTtsVoiceName(languageCode: string, profileVoice: string): string {
+  const lc = languageCode.toLowerCase();
+  if (
+    LEGACY_CLOUD_TTS_VOICE.test(profileVoice) &&
+    profileVoice.toLowerCase().startsWith(lc.split("-")[0]!)
+  ) {
+    return profileVoice;
+  }
+  if (lc.startsWith("pt")) return "pt-PT-Wavenet-A";
+  if (lc.startsWith("nb") || lc.startsWith("no") || lc.startsWith("nn")) return "nb-NO-Wavenet-E";
+  if (lc.startsWith("en-gb")) return "en-GB-Neural2-A";
+  if (lc.startsWith("en")) return "en-US-Neural2-F";
+  return "";
+}
+
 async function synthesizeWithGoogleCloudTts(
   env: Env,
   params: {
@@ -338,21 +358,26 @@ async function synthesizeWithGoogleCloudTts(
 ): Promise<{ bytes: Uint8Array; contentType: string } | null> {
   if (!env.GOOGLE_TTS_API_KEY) return null;
 
-  const res = await fetch(
-    `https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(env.GOOGLE_TTS_API_KEY)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        input: { text: params.text },
-        voice: { languageCode: params.languageCode, name: params.voiceName },
-        audioConfig: {
-          audioEncoding: "MP3",
-          speakingRate: params.slow ? 0.75 : 1.0,
-        },
-      }),
+  const cloudVoice = resolveCloudTtsVoiceName(params.languageCode, params.voiceName);
+  const voicePayload = cloudVoice
+    ? { languageCode: params.languageCode, name: cloudVoice }
+    : { languageCode: params.languageCode };
+
+  const res = await fetch("https://texttospeech.googleapis.com/v1/text:synthesize", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": env.GOOGLE_TTS_API_KEY,
     },
-  );
+    body: JSON.stringify({
+      input: { text: params.text },
+      voice: voicePayload,
+      audioConfig: {
+        audioEncoding: "MP3",
+        speakingRate: params.slow ? 0.78 : 1.0,
+      },
+    }),
+  });
 
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
