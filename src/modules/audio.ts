@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Env } from "../types";
+import type { Env, LearnerProfileDto } from "../types";
 import { getActiveProfile, resolveProfileId } from "./profile";
 
 const speakSchema = z.object({
@@ -725,14 +725,31 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
       slow: data.slow,
     });
     if (gcAudio) {
+      const headers: Record<string, string> = {
+        "Content-Type": gcAudio.contentType,
+        "Content-Length": String(gcAudio.bytes.byteLength),
+        "Cache-Control": "private, max-age=2592000",
+        "X-Audio-Provider": "google-cloud-tts",
+        "X-Audio-Cache": "MISS",
+      };
+      if (c.env.UPLOADS) {
+        headers["Content-Location"] = contentLocation;
+        const putPromise = c.env.UPLOADS.put(cacheKey, gcAudio.bytes, {
+          httpMetadata: {
+            contentType: gcAudio.contentType,
+            cacheControl: "private, max-age=2592000",
+          },
+          customMetadata: {
+            provider: "google-cloud-tts",
+          },
+        });
+        try {
+          c.executionCtx.waitUntil(putPromise);
+        } catch {}
+      }
       return new Response(gcAudio.bytes, {
         status: 200,
-        headers: {
-          "Content-Type": gcAudio.contentType,
-          "Content-Length": String(gcAudio.bytes.byteLength),
-          "X-Audio-Provider": "google-cloud-tts",
-          "X-Audio-Cache": "MISS",
-        },
+        headers,
       });
     }
   }
@@ -742,6 +759,73 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     501,
     { "X-Audio-Fallback-Reason": opened.reason || "provider-unavailable" },
   );
+}
+
+export async function prewarmAudioItems(
+  env: Env,
+  profile: LearnerProfileDto,
+  items: Array<{ text: string; languageCode: string; slow?: boolean }>,
+): Promise<void> {
+  if (!env.UPLOADS || !env.GOOGLE_TTS_API_KEY || items.length === 0) return;
+
+  const geminiVoice = resolveGeminiVoiceName(profile.ttsVoiceName, env.GEMINI_TTS_VOICE);
+  const model = env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts";
+  const seen = new Set<string>();
+  const unique = items
+    .map((it) => ({
+      text: it.text.trim(),
+      languageCode: it.languageCode || profile.targetLanguageCode,
+      slow: Boolean(it.slow),
+    }))
+    .filter((it) => {
+      if (!it.text) return false;
+      const k = `${it.languageCode}|${it.slow ? 1 : 0}|${it.text}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 12);
+
+  // Bounded parallel batches of 3 via high-RPM Cloud TTS (never burns Gemini RPM quota)
+  for (let i = 0; i < unique.length; i += 3) {
+    const batch = unique.slice(i, i + 3);
+    await Promise.all(
+      batch.map(async (item) => {
+        try {
+          const cacheKey = await computeAudioCacheKey([
+            model,
+            geminiVoice,
+            profile.ttsVoiceName,
+            item.languageCode,
+            item.slow ? "slow" : "normal",
+            item.text,
+          ]);
+          const exists = env.UPLOADS?.head
+            ? await env.UPLOADS.head(cacheKey)
+            : await env.UPLOADS!.get(cacheKey);
+          if (exists) return;
+
+          const gc = await synthesizeWithGoogleCloudTts(env, {
+            text: item.text,
+            languageCode: item.languageCode,
+            voiceName: profile.ttsVoiceName,
+            slow: item.slow,
+          });
+          if (!gc) return;
+
+          await env.UPLOADS!.put(cacheKey, gc.bytes, {
+            httpMetadata: {
+              contentType: gc.contentType,
+              cacheControl: "private, max-age=2592000",
+            },
+            customMetadata: {
+              provider: "google-cloud-tts",
+            },
+          });
+        } catch {}
+      }),
+    );
+  }
 }
 
 export const audioRoutes = new Hono<{ Bindings: Env }>();

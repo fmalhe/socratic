@@ -1081,10 +1081,8 @@
     const buttonKeyMap = {
       "hw-q-listen-pt": "hw-q-pt",
       "hw-q-listen-no": "hw-q-no",
-      "hw-q-listen-gb": "hw-q-gb",
       "hw-explain-pt": "hw-explain-pt",
       "hw-explain-no": "hw-explain-no",
-      "hw-explain-gb": "hw-explain-gb",
     };
 
     Object.entries(buttonKeyMap).forEach(([domId, key]) => {
@@ -1209,8 +1207,8 @@
       const noBtn = document.createElement("button");
       noBtn.className = "flag-icon-btn";
       noBtn.type = "button";
-      noBtn.title = "Listen in Norwegian";
-      noBtn.setAttribute("aria-label", "Listen to sentence in Norwegian");
+      noBtn.title = "Ouvir em Norueguês";
+      noBtn.setAttribute("aria-label", "Ouvir frase em Norueguês");
       noBtn.innerHTML = FLAG_SVGS.no;
       noBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1218,19 +1216,7 @@
         onTranslatePlay(idx, "nb-NO", sent);
       });
 
-      const gbBtn = document.createElement("button");
-      gbBtn.className = "flag-icon-btn";
-      gbBtn.type = "button";
-      gbBtn.title = "Listen in English";
-      gbBtn.setAttribute("aria-label", "Listen to sentence in English");
-      gbBtn.innerHTML = FLAG_SVGS.gb;
-      gbBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onSelectIndex(idx);
-        onTranslatePlay(idx, "en-US", sent);
-      });
-
-      flagsWrap.append(noBtn, gbBtn);
+      flagsWrap.append(noBtn);
       row.append(textEl, flagsWrap);
       containerEl.appendChild(row);
       rowsMeta.push({ row, wordSpans });
@@ -1321,7 +1307,7 @@
       const pBtn = document.createElement("button");
       pBtn.type = "button";
       pBtn.className = `step-pill${state.hwSubView === "passage" ? " is-active" : ""}`;
-      pBtn.innerHTML = `<span aria-hidden="true">📖</span><span>Text</span>`;
+      pBtn.innerHTML = `<span aria-hidden="true">📖</span><span>Texto</span>`;
       pBtn.addEventListener("click", () => {
         AudioController.stop();
         state.hwSubView = "passage";
@@ -1491,7 +1477,7 @@
     }
     const ex = session.exercises[state.hwExerciseIndex];
 
-    $("hw-question-badge").textContent = `Question ${ex.label}`;
+    $("hw-question-badge").textContent = `Pergunta ${ex.label}`;
     $("hw-question-done-badge").hidden = ex.status !== "COMPLETED";
     $("hw-q-slow-toggle").setAttribute("aria-pressed", String(state.hwSlow));
 
@@ -1501,7 +1487,7 @@
       ex.trickyWords || [],
     );
 
-    // Rebind Question Audio buttons cleanly by cloning or setting onclick
+    // Rebind Question Audio buttons
     $("hw-q-listen-pt").onclick = () => {
       AudioController.speak({
         key: "hw-q-pt",
@@ -1526,19 +1512,6 @@
         onBeforeFetch: async () => {
           const fresh = await ensureExerciseHydrated(session, ex);
           return fresh.promptNative || "";
-        },
-      });
-    };
-
-    $("hw-q-listen-gb").onclick = () => {
-      AudioController.speak({
-        key: "hw-q-gb",
-        text: ex.promptEnglish || "",
-        languageCode: "en-US",
-        slow: state.hwSlow,
-        onBeforeFetch: async () => {
-          const fresh = await ensureExerciseHydrated(session, ex);
-          return fresh.promptEnglish || "";
         },
       });
     };
@@ -1568,7 +1541,7 @@
       trickyRow.hidden = true;
     }
 
-    // Audio-First Owl Helper Dock Flag Buttons
+    // Audio-First Owl Helper Dock Flag Buttons (Português + Norsk only)
     $("hw-explain-pt").onclick = () => {
       AudioController.speak({
         key: "hw-explain-pt",
@@ -1591,23 +1564,10 @@
       });
     };
 
-    $("hw-explain-gb").onclick = () => {
-      AudioController.speak({
-        key: "hw-explain-gb",
-        text: ex.explanationEnglish || "",
-        languageCode: "en-US",
-        slow: state.hwSlow,
-        onBeforeFetch: async () => {
-          const fresh = await ensureExerciseHydrated(session, ex);
-          return fresh.explanationEnglish || "";
-        },
-      });
-    };
-
     // Ping-Pong Chat Messages
     renderHomeworkChat(ex);
 
-    // Polite background prefetch for instant flag & question playback
+    // Polite background prefetch for instant PT & NO flag playback
     PrefetchManager.reset();
     const targetLang = state.profile?.targetLanguageCode || "pt-PT";
     const nativeLang = state.profile?.nativeLanguageCode || "nb-NO";
@@ -1616,12 +1576,10 @@
         { text: freshEx.promptTarget, languageCode: targetLang, slow: state.hwSlow },
         { text: freshEx.explanationNative, languageCode: nativeLang, slow: state.hwSlow },
         { text: freshEx.explanationTarget, languageCode: targetLang, slow: state.hwSlow },
-        { text: freshEx.explanationEnglish, languageCode: "en-US", slow: state.hwSlow },
         { text: freshEx.promptNative, languageCode: nativeLang, slow: state.hwSlow },
-        { text: freshEx.promptEnglish, languageCode: "en-US", slow: state.hwSlow },
       ]);
     };
-    if (!ex.promptNative || !ex.promptEnglish || !ex.explanationTarget || !ex.explanationEnglish) {
+    if (!ex.promptNative || !ex.explanationTarget) {
       ensureExerciseHydrated(session, ex).then(queueExerciseAudio).catch(() => {});
     } else {
       queueExerciseAudio(ex);
@@ -1748,11 +1706,11 @@
     try {
       const d = new Date(iso);
       const today = new Date();
-      if (d.toDateString() === today.toDateString()) return "Today";
+      if (d.toDateString() === today.toDateString()) return "Hoje";
       const yesterday = new Date(today);
       yesterday.setDate(today.getDate() - 1);
-      if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      if (d.toDateString() === yesterday.toDateString()) return "Ontem";
+      return d.toLocaleDateString("pt-PT", { month: "short", day: "numeric" });
     } catch {
       return "";
     }
@@ -1774,7 +1732,7 @@
     if (visible.length === 0) {
       const empty = document.createElement("p");
       empty.className = "settings-note";
-      empty.textContent = "No saved pages yet.";
+      empty.textContent = "Ainda não há páginas guardadas.";
       list.appendChild(empty);
       return;
     }
@@ -1788,7 +1746,7 @@
             const img = document.createElement("img");
             img.className = "page-thumb";
             img.src = sess.imageUrl;
-            img.alt = sess.pageTitle || "Homework page";
+            img.alt = sess.pageTitle || "Página de TPC";
             return img;
           })()
         : (() => {
@@ -1802,7 +1760,7 @@
       meta.className = "page-card-meta";
       const title = document.createElement("div");
       title.className = "page-card-title";
-      title.textContent = sess.pageTitle || "Homework Page";
+      title.textContent = sess.pageTitle || "Página de TPC";
 
       const sub = document.createElement("div");
       sub.className = "page-card-sub";
@@ -1825,12 +1783,12 @@
       const delBtn = document.createElement("button");
       delBtn.type = "button";
       delBtn.className = "icon-btn";
-      delBtn.title = "Delete page";
-      delBtn.setAttribute("aria-label", "Delete page");
+      delBtn.title = "Apagar página";
+      delBtn.setAttribute("aria-label", "Apagar página");
       delBtn.textContent = "🗑️";
       delBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (!confirm(`Delete "${sess.pageTitle || "this page"}"?`)) return;
+        if (!confirm(`Apagar "${sess.pageTitle || "esta página"}"?`)) return;
         const res = await fetch(`/api/homework/sessions/${sess.id}`, { method: "DELETE" });
         if (res.ok) {
           state.sessions = state.sessions.filter((x) => x.id !== sess.id);
@@ -1844,7 +1802,7 @@
             renderHomeworkSession();
           }
           renderPagesDrawer($("pages-search-input").value);
-          showToast("Page removed");
+          showToast("Página removida");
         }
       });
 
@@ -1876,7 +1834,7 @@
     if (words.length === 0) {
       const p = document.createElement("p");
       p.className = "settings-note";
-      p.textContent = "Finish exercises or book pages to collect tricky words here!";
+      p.textContent = "Completa exercícios ou páginas para guardar palavras difíceis aqui!";
       wordsEl.appendChild(p);
       return;
     }
@@ -1947,9 +1905,9 @@
         fillEl: $("hw-progress-fill"),
         msgEl: $("hw-progress-msg"),
         messages: [
-          "Owly is looking at your page…",
-          "Finding the story and questions…",
-          "Getting everything ready for you…",
+          "O Owly está a olhar para a tua página…",
+          "A encontrar o texto e as perguntas…",
+          "A preparar tudo para ti…",
         ],
       });
 
@@ -1960,14 +1918,14 @@
       state.hwExerciseIndex = 0;
       state.passageActiveSentenceIdx = 0;
       renderHomeworkSession();
-      showToast("Page ready!");
+      showToast("Página pronta!");
     } catch (err) {
       if (err && err.isCancelled) {
         renderHomeworkSession();
       } else {
         $("hw-progress-card").hidden = true;
         $("hw-error-card").hidden = false;
-        $("hw-error-raw").textContent = err?.message || "Unknown error";
+        $("hw-error-raw").textContent = err?.message || "Erro desconhecido";
       }
     } finally {
       state.isUploading = false;
@@ -1995,23 +1953,23 @@
         fillEl: $("read-progress-fill"),
         msgEl: $("read-progress-msg"),
         messages: [
-          "Owly is reading your book page…",
-          "Splitting sentences for karaoke…",
-          "Almost ready to read aloud…",
+          "O Owly está a ler a tua página…",
+          "A dividir em frases para leitura…",
+          "Quase pronto para ouvir…",
         ],
       });
 
       state.readData = scanned;
       state.readActiveSentenceIdx = 0;
       renderReadMode();
-      showToast("Book page ready!");
+      showToast("Página do livro pronta!");
     } catch (err) {
       if (err && err.isCancelled) {
         renderReadMode();
       } else {
         $("read-progress-card").hidden = true;
         $("read-error-card").hidden = false;
-        $("read-error-raw").textContent = err?.message || "Unknown error";
+        $("read-error-raw").textContent = err?.message || "Erro desconhecido";
       }
     } finally {
       state.isUploading = false;
@@ -2195,9 +2153,9 @@
       if (res.ok) {
         state.profile = await res.json();
         $("settings-modal").hidden = true;
-        showToast("Settings saved!");
+        showToast("Definições guardadas!");
       } else {
-        showToast("Could not save settings");
+        showToast("Não foi possível guardar");
       }
     });
 
@@ -2275,7 +2233,7 @@
           state.progress = await progRes.json();
           renderProgressUI();
         }
-        showToast("⭐ +2 Stars! Great job!");
+        showToast("⭐ +2 Estrelas! Muito bem!");
         const nextIdx = session.exercises.findIndex((item, i) => i > state.hwExerciseIndex && item.status !== "COMPLETED");
         if (nextIdx >= 0) {
           setTimeout(() => {
@@ -2308,7 +2266,7 @@
         state.progress = await res.json();
         renderProgressUI();
       }
-      showToast("⭐ +3 Stars for reading!");
+      showToast("⭐ +3 Estrelas pela leitura!");
     });
   }
 

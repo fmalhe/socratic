@@ -895,8 +895,8 @@ body {
 
 .flag-dock-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
 
 .flag-dock-btn {

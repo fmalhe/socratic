@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { arrayBufferToInlineImage, callGeminiStructured, renderReadingSystemPrompt } from "../lib/gemini";
 import type { Env, ReadingPageResponse } from "../types";
+import { prewarmAudioItems } from "./audio";
 import { getActiveProfile, resolveProfileId } from "./profile";
 import { storeUploadedImage, validateImageUpload } from "./uploads";
 
@@ -55,6 +56,16 @@ readingRoutes.post("/scan", async (c) => {
     image: inlineImage,
     responseSchema: READING_SCHEMA,
   });
+
+  const warmItems = (response.sentences ?? []).slice(0, 6).flatMap((s) => [
+    { text: s.targetText, languageCode: profile.targetLanguageCode, slow: false },
+    ...(s.nativeSummary ? [{ text: s.nativeSummary, languageCode: profile.nativeLanguageCode, slow: false }] : []),
+  ]);
+  if (warmItems.length > 0) {
+    try {
+      c.executionCtx.waitUntil(prewarmAudioItems(c.env, profile, warmItems));
+    } catch {}
+  }
 
   return c.json({
     ...response,

@@ -1,7 +1,7 @@
 {
-  "name": "Socratic — Sofia's Reading & Homework Buddy",
+  "name": "Socratic — Tutor de Leitura e TPC",
   "short_name": "Socratic",
-  "description": "Playful audio-first Portuguese & Norwegian reading and homework buddy for kids.",
+  "description": "Tutor divertido de leitura e trabalhos de casa em Português Europeu e Norueguês.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FAF7F2",

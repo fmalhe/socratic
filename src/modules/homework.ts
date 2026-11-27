@@ -22,6 +22,7 @@ import type {
   SentenceItem,
   WordHint,
 } from "../types";
+import { prewarmAudioItems } from "./audio";
 import { getActiveProfile, resolveProfileId } from "./profile";
 import { buildUploadUrl, deleteUploadedImage, storeUploadedImage, validateImageUpload } from "./uploads";
 
@@ -444,6 +445,29 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
 
   if (exerciseStatements.length > 0) {
     await c.env.DB.batch(exerciseStatements);
+  }
+
+  const warmItems: Array<{ text: string; languageCode: string; slow?: boolean }> = [];
+  for (const s of passageToStore.sentences.slice(0, 4)) {
+    warmItems.push({ text: s.targetText, languageCode: profile.targetLanguageCode, slow: false });
+    if (s.nativeSummary) {
+      warmItems.push({ text: s.nativeSummary, languageCode: profile.nativeLanguageCode, slow: false });
+    }
+  }
+  for (const ex of (scanned.exercises ?? []).slice(0, 2)) {
+    warmItems.push({ text: ex.promptTarget, languageCode: profile.targetLanguageCode, slow: false });
+    warmItems.push({ text: ex.explanationNative, languageCode: profile.nativeLanguageCode, slow: false });
+    if (ex.explanationTarget) {
+      warmItems.push({ text: ex.explanationTarget, languageCode: profile.targetLanguageCode, slow: false });
+    }
+    if (ex.promptNative) {
+      warmItems.push({ text: ex.promptNative, languageCode: profile.nativeLanguageCode, slow: false });
+    }
+  }
+  if (warmItems.length > 0) {
+    try {
+      c.executionCtx.waitUntil(prewarmAudioItems(c.env, profile, warmItems));
+    } catch {}
   }
 
   const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);

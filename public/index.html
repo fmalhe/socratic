@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="pt-PT" data-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Socratic — Reading &amp; Homework Buddy</title>
+  <title>Socratic — Leitura e TPC</title>
   <meta name="theme-color" content="#FAF7F2" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -37,7 +37,7 @@
         <span class="brand-name">Socratic</span>
       </div>
 
-      <nav class="tab-bar" role="tablist" aria-label="Main learning mode">
+      <nav class="tab-bar" role="tablist" aria-label="Modo de aprendizagem">
         <button
           id="tab-homework"
           class="tab-pill is-active"
@@ -46,7 +46,7 @@
           type="button"
         >
           <span aria-hidden="true">✏️</span>
-          <span>Homework</span>
+          <span>TPC</span>
         </button>
         <button
           id="tab-read"
@@ -56,19 +56,19 @@
           type="button"
         >
           <span aria-hidden="true">📖</span>
-          <span>Read</span>
+          <span>Ler</span>
         </button>
       </nav>
 
       <div class="header-actions">
-        <button id="stars-pill" class="stars-pill" type="button" title="Your Stars &amp; Words" aria-label="Open Stars and Saved Words">
+        <button id="stars-pill" class="stars-pill" type="button" title="As tuas estrelas e palavras" aria-label="Abrir estrelas e palavras guardadas">
           <span aria-hidden="true">⭐</span>
           <span id="header-stars-count">0</span>
         </button>
-        <button id="theme-toggle" class="icon-btn" type="button" title="Switch light or dark theme" aria-label="Switch theme">
+        <button id="theme-toggle" class="icon-btn" type="button" title="Mudar tema claro ou escuro" aria-label="Mudar tema">
           <span id="theme-toggle-icon" aria-hidden="true">🌙</span>
         </button>
-        <button id="settings-btn" class="icon-btn" type="button" title="Parent Settings" aria-label="Parent Settings">
+        <button id="settings-btn" class="icon-btn" type="button" title="Definições para Adultos" aria-label="Definições para Adultos">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3"></circle>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -82,94 +82,94 @@
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
     <!-- ===================================================== -->
-    <!-- VIEW 1: HOMEWORK                                      -->
+    <!-- VISTA 1: TPC                                          -->
     <!-- ===================================================== -->
     <section id="view-homework" class="view-section">
       <div id="hw-empty-state" class="card empty-hero">
         <div class="owl-stage" data-owl-state="idle">
           <div id="hw-hero-owl" class="owl-svg-slot"></div>
         </div>
-        <h1 class="hero-title">Let&rsquo;s do homework together!</h1>
-        <p class="hero-subtitle">Snap a photo of your page and Owly will help you read &amp; understand.</p>
+        <h1 class="hero-title">Vamos fazer os TPC juntos!</h1>
+        <p class="hero-subtitle">Tira uma foto à página e o Owly ajuda-te a ler e perceber.</p>
 
         <input id="hw-file-input" class="visually-hidden" type="file" accept="image/*" />
         <div class="hero-cta-row">
           <button id="hw-camera-btn" class="btn btn-primary btn-xl" type="button">
             <span aria-hidden="true">📷</span>
-            <span>Take a Photo or Pick Page</span>
+            <span>Tirar Foto ou Escolher Página</span>
           </button>
           <button id="hw-open-pages-empty" class="btn btn-secondary btn-lg" type="button" hidden>
             <span aria-hidden="true">📚</span>
-            <span>Recent Pages</span>
+            <span>Páginas Recentes</span>
           </button>
         </div>
       </div>
 
       <div id="hw-progress-card" class="card scan-progress-card" hidden>
         <div class="scan-preview-wrap">
-          <img id="hw-progress-thumb" class="scan-preview-img" alt="Uploaded homework photo" />
+          <img id="hw-progress-thumb" class="scan-preview-img" alt="Foto dos trabalhos" />
           <div class="scan-beam" aria-hidden="true"></div>
         </div>
         <div class="scan-status-col">
           <div class="owl-mini-slot" data-owl-state="loading"></div>
-          <p id="hw-progress-msg" class="scan-msg">Owly is looking at your page&hellip;</p>
+          <p id="hw-progress-msg" class="scan-msg">O Owly está a olhar para a tua página&hellip;</p>
           <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
             <div id="hw-progress-fill" class="progress-fill" style="width: 18%"></div>
           </div>
-          <button id="hw-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancel</button>
+          <button id="hw-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancelar</button>
         </div>
       </div>
 
       <div id="hw-error-card" class="card error-card" hidden>
         <div class="owl-mini-slot" data-owl-state="idle"></div>
-        <h2 class="error-title">Oops! That photo was tricky to read.</h2>
-        <p class="error-subtitle">Try holding the camera steady in bright light.</p>
+        <h2 class="error-title">Ups! Foi difícil ler esta foto.</h2>
+        <p class="error-subtitle">Tenta segurar a câmara firme e com boa luz.</p>
         <div class="error-actions">
-          <button id="hw-error-retry" class="btn btn-primary" type="button">Try Another Photo</button>
-          <button id="hw-error-dismiss" class="btn btn-ghost" type="button">Back</button>
+          <button id="hw-error-retry" class="btn btn-primary" type="button">Tentar Outra Foto</button>
+          <button id="hw-error-dismiss" class="btn btn-ghost" type="button">Voltar</button>
         </div>
         <details class="error-details">
-          <summary>Details for grown-ups</summary>
+          <summary>Detalhes para adultos</summary>
           <code id="hw-error-raw"></code>
         </details>
       </div>
 
       <div id="hw-session-stage" class="session-stage" hidden>
         <div class="workspace-bar">
-          <h2 id="hw-page-title" class="page-title">Homework Page</h2>
+          <h2 id="hw-page-title" class="page-title">Página de TPC</h2>
           <div class="workspace-actions">
-            <button id="hw-photo-btn" class="pill-btn" type="button" title="See scanned photo">
+            <button id="hw-photo-btn" class="pill-btn" type="button" title="Ver foto digitalizada">
               <span aria-hidden="true">📷</span>
-              <span>Photo</span>
+              <span>Foto</span>
             </button>
-            <button id="hw-pages-btn" class="pill-btn" type="button" title="Open saved pages">
+            <button id="hw-pages-btn" class="pill-btn" type="button" title="Abrir páginas guardadas">
               <span aria-hidden="true">📚</span>
-              <span>Pages</span>
+              <span>Páginas</span>
             </button>
             <button id="hw-new-btn" class="pill-btn pill-accent" type="button">
               <span aria-hidden="true">✨</span>
-              <span>New</span>
+              <span>Nova</span>
             </button>
           </div>
         </div>
 
-        <div id="hw-stepper" class="stepper-bar" role="tablist" aria-label="Page sections"></div>
+        <div id="hw-stepper" class="stepper-bar" role="tablist" aria-label="Secções da página"></div>
 
-        <!-- Stage A: Homework Reading Passage -->
+        <!-- Texto de Leitura do TPC -->
         <div id="hw-passage-stage" class="card passage-card" hidden>
           <div class="passage-header">
-            <span class="passage-badge">📖 Story &amp; Text</span>
+            <span class="passage-badge">📖 Texto</span>
             <h3 id="hw-passage-title" class="passage-title"></h3>
           </div>
           <div id="hw-passage-sentences" class="karaoke-sentence-list"></div>
         </div>
 
-        <!-- Stage B: Individual Exercise -->
+        <!-- Exercício Individual -->
         <div id="hw-exercise-stage" class="exercise-stage" hidden>
           <div class="card question-hero-card">
             <div class="question-top-row">
-              <span id="hw-question-badge" class="question-badge">Question 1</span>
-              <span id="hw-question-done-badge" class="done-badge" hidden>✓ Done!</span>
+              <span id="hw-question-badge" class="question-badge">Pergunta 1</span>
+              <span id="hw-question-done-badge" class="done-badge" hidden>✓ Feito!</span>
             </div>
 
             <div id="hw-question-karaoke" class="karaoke-prompt" dir="auto"></div>
@@ -177,7 +177,7 @@
             <div class="question-audio-bar">
               <button id="hw-q-listen-pt" class="listen-hero-btn" type="button">
                 <span class="flag-slot" data-flag="pt"></span>
-                <span id="hw-q-listen-pt-label">Listen</span>
+                <span id="hw-q-listen-pt-label">Ouvir</span>
                 <span class="btn-spinner" hidden></span>
                 <span class="eq-bars" hidden><i></i><i></i><i></i></span>
               </button>
@@ -187,10 +187,10 @@
                 class="slow-pill"
                 type="button"
                 aria-pressed="false"
-                title="Read slower"
+                title="Ler mais devagar"
               >
                 <span aria-hidden="true">🐢</span>
-                <span>Slow</span>
+                <span>Devagar</span>
               </button>
 
               <div class="question-flag-pair">
@@ -198,21 +198,10 @@
                   id="hw-q-listen-no"
                   class="flag-icon-btn"
                   type="button"
-                  title="Hear question in Norwegian"
-                  aria-label="Hear question in Norwegian"
+                  title="Ouvir pergunta em Norueguês"
+                  aria-label="Ouvir pergunta em Norueguês"
                 >
                   <span class="flag-slot" data-flag="no"></span>
-                  <span class="btn-spinner" hidden></span>
-                  <span class="eq-bars" hidden><i></i><i></i><i></i></span>
-                </button>
-                <button
-                  id="hw-q-listen-gb"
-                  class="flag-icon-btn"
-                  type="button"
-                  title="Hear question in English"
-                  aria-label="Hear question in English"
-                >
-                  <span class="flag-slot" data-flag="gb"></span>
                   <span class="btn-spinner" hidden></span>
                   <span class="eq-bars" hidden><i></i><i></i><i></i></span>
                 </button>
@@ -222,12 +211,12 @@
             <div id="hw-tricky-words" class="tricky-words-row" hidden></div>
           </div>
 
-          <!-- Audio-First Owl Helper Dock (ZERO explanation text walls) -->
+          <!-- Painel do Owly só com Áudio (Português & Norueguês) -->
           <div id="hw-owl-dock" class="card owl-helper-dock">
             <div class="owl-dock-top">
               <div id="hw-owl-svg" class="owl-dock-avatar" data-owl-state="idle"></div>
               <div class="owl-dock-copy">
-                <span class="owl-dock-title">Tap a flag to hear Owly explain!</span>
+                <span class="owl-dock-title">Toca numa bandeira para ouvir o Owly explicar!</span>
               </div>
             </div>
 
@@ -244,23 +233,17 @@
                 <span class="btn-spinner" hidden></span>
                 <span class="eq-bars" hidden><i></i><i></i><i></i></span>
               </button>
-              <button id="hw-explain-gb" class="flag-dock-btn" type="button" data-lang="en-US">
-                <span class="flag-slot" data-flag="gb"></span>
-                <span class="flag-label">English</span>
-                <span class="btn-spinner" hidden></span>
-                <span class="eq-bars" hidden><i></i><i></i><i></i></span>
-              </button>
             </div>
           </div>
 
           <div class="kid-action-row">
             <button id="hw-chat-toggle" class="btn btn-secondary" type="button" aria-expanded="false">
               <span aria-hidden="true">💬</span>
-              <span>Ask Owly</span>
+              <span>Perguntar ao Owly</span>
             </button>
             <button id="hw-complete-btn" class="btn btn-celebrate" type="button">
               <span aria-hidden="true">⭐</span>
-              <span>I finished this!</span>
+              <span>Já acabei!</span>
             </button>
           </div>
 
@@ -275,10 +258,10 @@
                 id="hw-chat-input"
                 class="chat-input"
                 type="text"
-                placeholder="Write a message to Owly&hellip;"
+                placeholder="Escreve ao Owly&hellip;"
                 autocomplete="off"
               />
-              <button id="hw-chat-send" class="btn btn-primary" type="submit">Send</button>
+              <button id="hw-chat-send" class="btn btn-primary" type="submit">Enviar</button>
             </form>
           </div>
         </div>
@@ -286,67 +269,67 @@
     </section>
 
     <!-- ===================================================== -->
-    <!-- VIEW 2: READ MODE                                     -->
+    <!-- VISTA 2: MODO DE LEITURA                              -->
     <!-- ===================================================== -->
     <section id="view-read" class="view-section" hidden>
       <div id="read-empty-state" class="card empty-hero">
         <div class="owl-stage" data-owl-state="idle">
           <div id="read-hero-owl" class="owl-svg-slot"></div>
         </div>
-        <h1 class="hero-title">Read a Portuguese book!</h1>
-        <p class="hero-subtitle">Snap any page and listen word by word at your own pace.</p>
+        <h1 class="hero-title">Lê um livro em Português!</h1>
+        <p class="hero-subtitle">Tira uma foto à página e ouve palavra a palavra ao teu ritmo.</p>
 
         <input id="read-file-input" class="visually-hidden" type="file" accept="image/*" />
         <button id="read-camera-btn" class="btn btn-primary btn-xl" type="button">
           <span aria-hidden="true">📖</span>
-          <span>Scan a Book Page</span>
+          <span>Fotografar Página do Livro</span>
         </button>
       </div>
 
       <div id="read-progress-card" class="card scan-progress-card" hidden>
         <div class="scan-preview-wrap">
-          <img id="read-progress-thumb" class="scan-preview-img" alt="Uploaded book photo" />
+          <img id="read-progress-thumb" class="scan-preview-img" alt="Foto do livro" />
           <div class="scan-beam" aria-hidden="true"></div>
         </div>
         <div class="scan-status-col">
           <div class="owl-mini-slot" data-owl-state="loading"></div>
-          <p id="read-progress-msg" class="scan-msg">Owly is reading your book page&hellip;</p>
+          <p id="read-progress-msg" class="scan-msg">O Owly está a ler a tua página&hellip;</p>
           <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
             <div id="read-progress-fill" class="progress-fill" style="width: 18%"></div>
           </div>
-          <button id="read-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancel</button>
+          <button id="read-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancelar</button>
         </div>
       </div>
 
       <div id="read-error-card" class="card error-card" hidden>
         <div class="owl-mini-slot" data-owl-state="idle"></div>
-        <h2 class="error-title">Oops! That page didn&rsquo;t quite come through.</h2>
-        <p class="error-subtitle">Try holding the camera steady in bright light.</p>
+        <h2 class="error-title">Ups! Não deu para ler esta página.</h2>
+        <p class="error-subtitle">Tenta segurar a câmara firme e com boa luz.</p>
         <div class="error-actions">
-          <button id="read-error-retry" class="btn btn-primary" type="button">Try Again</button>
-          <button id="read-error-dismiss" class="btn btn-ghost" type="button">Back</button>
+          <button id="read-error-retry" class="btn btn-primary" type="button">Tentar Outra Vez</button>
+          <button id="read-error-dismiss" class="btn btn-ghost" type="button">Voltar</button>
         </div>
         <details class="error-details">
-          <summary>Details for grown-ups</summary>
+          <summary>Detalhes para adultos</summary>
           <code id="read-error-raw"></code>
         </details>
       </div>
 
       <div id="read-stage" class="session-stage" hidden>
         <div class="workspace-bar">
-          <h2 class="page-title">Book Page</h2>
+          <h2 class="page-title">Página do Livro</h2>
           <div class="workspace-actions">
             <button id="read-photo-btn" class="pill-btn" type="button">
               <span aria-hidden="true">📷</span>
-              <span>Photo</span>
+              <span>Foto</span>
             </button>
             <button id="read-new-btn" class="pill-btn" type="button">
               <span aria-hidden="true">✨</span>
-              <span>New Page</span>
+              <span>Nova Página</span>
             </button>
             <button id="read-finish-btn" class="pill-btn pill-celebrate" type="button">
               <span aria-hidden="true">⭐</span>
-              <span>Finish</span>
+              <span>Concluir</span>
             </button>
           </div>
         </div>
@@ -356,119 +339,119 @@
     </section>
   </main>
 
-  <!-- Sticky Bottom Floating Glass Audio Dock (Read Mode + Homework Passage) -->
+  <!-- Barra Flutuante de Áudio -->
   <div id="floating-audio-dock" class="floating-audio-dock" hidden>
     <div class="dock-inner">
-      <button id="dock-slow-btn" class="slow-pill" type="button" aria-pressed="false" title="Read slower">
+      <button id="dock-slow-btn" class="slow-pill" type="button" aria-pressed="false" title="Ler mais devagar">
         <span aria-hidden="true">🐢</span>
       </button>
-      <button id="dock-prev-btn" class="dock-nav-btn" type="button" aria-label="Previous sentence" title="Previous">⏮</button>
-      <button id="dock-play-btn" class="dock-play-btn" type="button" aria-label="Play or Pause">
+      <button id="dock-prev-btn" class="dock-nav-btn" type="button" aria-label="Frase anterior" title="Anterior">⏮</button>
+      <button id="dock-play-btn" class="dock-play-btn" type="button" aria-label="Ouvir ou Pausar">
         <span id="dock-play-icon">▶</span>
         <span class="btn-spinner" hidden></span>
       </button>
-      <button id="dock-stop-btn" class="dock-nav-btn" type="button" aria-label="Stop reading" title="Stop">⏹</button>
-      <button id="dock-next-btn" class="dock-nav-btn" type="button" aria-label="Next sentence" title="Next">⏭</button>
+      <button id="dock-stop-btn" class="dock-nav-btn" type="button" aria-label="Parar" title="Parar">⏹</button>
+      <button id="dock-next-btn" class="dock-nav-btn" type="button" aria-label="Próxima frase" title="Próxima">⏭</button>
       <span id="dock-status-label" class="dock-status-label">1 / 1</span>
     </div>
   </div>
 
-  <!-- Slide-over Drawer: Visual Recent Pages -->
+  <!-- Gaveta: Páginas Recentes -->
   <div id="pages-drawer" class="modal-backdrop" hidden>
     <div class="drawer-sheet" role="dialog" aria-modal="true" aria-labelledby="pages-drawer-title">
       <div class="modal-header">
-        <h2 id="pages-drawer-title" class="modal-title">📚 Recent Pages</h2>
-        <button id="pages-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+        <h2 id="pages-drawer-title" class="modal-title">📚 Páginas Recentes</h2>
+        <button id="pages-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
       </div>
       <div id="pages-search-wrap" class="pages-search-wrap" hidden>
-        <input id="pages-search-input" class="chat-input" type="search" placeholder="Search pages&hellip;" />
+        <input id="pages-search-input" class="chat-input" type="search" placeholder="Procurar páginas&hellip;" />
       </div>
       <div id="pages-list" class="pages-grid"></div>
     </div>
   </div>
 
-  <!-- Modal: Stars & Word Bank -->
+  <!-- Modal: Estrelas & Palavras -->
   <div id="stars-modal" class="modal-backdrop" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stars-modal-title">
       <div class="modal-header">
-        <h2 id="stars-modal-title" class="modal-title">⭐ My Stars &amp; Words</h2>
-        <button id="stars-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+        <h2 id="stars-modal-title" class="modal-title">⭐ Estrelas e Palavras</h2>
+        <button id="stars-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
       </div>
       <div class="stars-stats-grid">
         <div class="stat-tile stat-gold">
           <div class="stat-value" id="modal-stars-val">0</div>
-          <div class="stat-label">Stars ⭐</div>
+          <div class="stat-label">Estrelas ⭐</div>
         </div>
         <div class="stat-tile stat-flame">
           <div class="stat-value" id="modal-streak-val">0</div>
-          <div class="stat-label">Day Streak 🔥</div>
+          <div class="stat-label">Dias Seguidos 🔥</div>
         </div>
         <div class="stat-tile stat-cobalt">
           <div class="stat-value" id="modal-pages-val">0</div>
-          <div class="stat-label">Pages Read 📖</div>
+          <div class="stat-label">Páginas Lidas 📖</div>
         </div>
       </div>
-      <h3 class="subhead">Tricky Words (tap to hear!)</h3>
+      <h3 class="subhead">Palavras Difíceis (toca para ouvir!)</h3>
       <div id="saved-words-list" class="saved-words-grid"></div>
     </div>
   </div>
 
-  <!-- Modal: Photo Lightbox -->
+  <!-- Modal: Foto -->
   <div id="photo-modal" class="modal-backdrop" hidden>
-    <div class="modal-card modal-photo-card" role="dialog" aria-modal="true" aria-label="Scanned page photo">
+    <div class="modal-card modal-photo-card" role="dialog" aria-modal="true" aria-label="Foto da página">
       <div class="modal-header">
-        <h2 class="modal-title">📷 Scanned Page</h2>
-        <button id="photo-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+        <h2 class="modal-title">📷 Página Digitalizada</h2>
+        <button id="photo-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
       </div>
-      <img id="photo-modal-img" class="photo-lightbox-img" alt="Scanned homework or book page" />
+      <img id="photo-modal-img" class="photo-lightbox-img" alt="Foto dos trabalhos ou livro" />
     </div>
   </div>
 
-  <!-- Modal: Discreet Parent Settings -->
+  <!-- Modal: Definições para Adultos -->
   <div id="settings-modal" class="modal-backdrop" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div class="modal-header">
-        <h2 id="settings-modal-title" class="modal-title">Parent Settings</h2>
-        <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Close">✕</button>
+        <h2 id="settings-modal-title" class="modal-title">Definições para Adultos</h2>
+        <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
       </div>
-      <p class="settings-note">Grown-up controls for language rules, learner profile, and voice selection.</p>
+      <p class="settings-note">Controlo de idioma, perfil da criança e seleção de voz.</p>
       <form id="settings-form" class="settings-form">
         <div class="settings-row-2">
           <label class="field-label">
-            Child&rsquo;s Name
+            Nome da Criança
             <input id="set-name" class="chat-input" type="text" required />
           </label>
           <label class="field-label">
-            Age
+            Idade
             <input id="set-age" class="chat-input" type="number" min="4" max="16" required />
           </label>
         </div>
         <div class="settings-row-2">
           <label class="field-label">
-            Target Language
+            Idioma a Aprender
             <input id="set-target-code" class="chat-input" type="text" required />
           </label>
           <label class="field-label">
-            Native Language
+            Idioma Materno
             <input id="set-native-code" class="chat-input" type="text" required />
           </label>
         </div>
         <label class="field-label">
-          AI Tutor Voice (Gemini)
+          Voz do Tutor (Gemini)
           <input id="set-voice" class="chat-input" type="text" placeholder="Sulafat" required />
         </label>
         <label class="field-label">
-          Dialect &amp; Tutoring Rules
+          Regras de Dialeto e Tutor
           <textarea id="set-dialect" class="chat-input" rows="3" required></textarea>
         </label>
         <div class="settings-footer">
-          <button class="btn btn-primary" type="submit">Save Settings</button>
+          <button class="btn btn-primary" type="submit">Guardar</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- Lightweight Word Syllable Popover + Confetti -->
+  <!-- Popover de Sílabas e Confetti -->
   <div id="word-popover" class="word-popover" hidden>
     <strong id="word-popover-syllables"></strong>
     <span id="word-popover-hint"></span>
