@@ -29,7 +29,14 @@ const apiCors = cors({
   origin: "*",
   allowMethods: ["GET", "POST", "PUT", "DELETE", "QUERY", "OPTIONS", "HEAD"],
   allowHeaders: ["Content-Type", "X-Profile-Id"],
-  exposeHeaders: ["Accept-Query", "Content-Location", "X-Audio-Provider", "X-Audio-Cache"],
+  exposeHeaders: [
+    "Accept-Query",
+    "Content-Location",
+    "X-Audio-Provider",
+    "X-Audio-Cache",
+    "X-Audio-Stream",
+    "X-Audio-Fallback-Reason",
+  ],
 });
 
 app.use("/api/*", async (c, next) => {

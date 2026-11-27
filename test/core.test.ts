@@ -510,4 +510,121 @@ describe("Worker HTTP routes", () => {
     expect(delRes.status).toBe(200);
     expect(deletedKeys).toEqual(["homework/old-page.jpg"]);
   });
+
+  it("falls back across Gemini TTS models on 429, halts prefetch on 429, and streams PCM with R2 WAV caching", async () => {
+    const r2Store = new Map<string, Uint8Array>();
+    const mockDb = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({
+            id: 1,
+            name: "Sofia",
+            age: 8,
+            target_language_code: "pt-PT",
+            target_language_name: "European Portuguese",
+            native_language_code: "nb-NO",
+            native_language_name: "Norwegian",
+            dialect_rules: "PT-PT",
+            tts_voice_name: "Sulafat",
+          }),
+        }),
+      }),
+    } as unknown as D1Database;
+
+    const mockBucket = {
+      get: async (key: string) => {
+        const bytes = r2Store.get(key);
+        if (!bytes) return null;
+        return {
+          body: new ReadableStream({
+            start(c) {
+              c.enqueue(bytes);
+              c.close();
+            },
+          }),
+          customMetadata: { provider: "gemini-tts" },
+          writeHttpMetadata: (h: Headers) => h.set("Content-Type", "audio/wav"),
+        };
+      },
+      put: async (key: string, val: Uint8Array) => {
+        r2Store.set(key, new Uint8Array(val));
+      },
+    } as unknown as R2Bucket;
+
+    const urls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const u = String(input);
+      urls.push(u);
+      if (u.includes("gemini-3.8-flash-lite-tts")) {
+        return new Response(JSON.stringify({ error: { message: "quota" } }), { status: 429 });
+      }
+      if (u.includes("streamGenerateContent")) {
+        const chunkB64 = btoa(String.fromCharCode(10, 0, 20, 0));
+        const sse = `data: ${JSON.stringify({
+          candidates: [{ content: { parts: [{ inlineData: { data: chunkB64 } }] } }],
+        })}\n\n`;
+        return new Response(sse, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+      }
+      const wavB64 = btoa(String.fromCharCode(5, 0, 6, 0));
+      return new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/l16;rate=24000", data: wavB64 } }] } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    try {
+      const env = makeEnv({ DB: mockDb, UPLOADS: mockBucket });
+
+      // 1. Prefetch returns 429 cleanly without hitting fallback models
+      const prefRes = await app.request(
+        "/api/audio/speak",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "Prefetch me", languageCode: "pt-PT", slow: false, prefetch: true }),
+        },
+        env,
+      );
+      expect(prefRes.status).toBe(429);
+      expect(urls).toHaveLength(1);
+
+      // 2. Real stream request waterfalls from 429 -> gemini-3.8-flash-tts, streams raw PCM, and saves WAV to R2
+      const streamRes = await app.request(
+        "/api/audio/stream",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "Bom dia Sofia!", languageCode: "pt-PT", slow: false }),
+        },
+        env,
+      );
+      expect(streamRes.status).toBe(200);
+      expect(streamRes.headers.get("Content-Type")).toContain("audio/l16");
+      expect(streamRes.headers.get("X-Audio-Stream")).toBe("1");
+      const pcmOut = new Uint8Array(await streamRes.arrayBuffer());
+      expect(Array.from(pcmOut)).toEqual([10, 0, 20, 0]);
+      // Wait one tick for background R2 write
+      await new Promise((r) => setTimeout(r, 10));
+      expect(r2Store.size).toBe(1);
+
+      // 3. Second stream request hits R2 WAV cache immediately
+      const cachedHit = await app.request(
+        "/api/audio/stream",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "Bom dia Sofia!", languageCode: "pt-PT", slow: false }),
+        },
+        env,
+      );
+      expect(cachedHit.status).toBe(200);
+      expect(cachedHit.headers.get("Content-Type")).toBe("audio/wav");
+      expect(cachedHit.headers.get("X-Audio-Cache")).toBe("HIT");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

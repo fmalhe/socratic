@@ -7,6 +7,7 @@ const speakSchema = z.object({
   text: z.string().trim().min(1).max(2000),
   languageCode: z.string().trim().min(1).nullable().optional(),
   slow: z.boolean().optional().default(false),
+  prefetch: z.boolean().optional().default(false),
 });
 
 const GEMINI_PREBUILT_VOICES = new Set([
@@ -103,6 +104,108 @@ function resolveGeminiVoiceName(profileVoice: string | undefined, envVoice: stri
   return "Sulafat";
 }
 
+function getGeminiTtsModels(env: Env, includeFallbacks: boolean): string[] {
+  const primary = env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts";
+  if (!includeFallbacks) return [primary];
+  const ordered = [primary, "gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+  return Array.from(new Set(ordered));
+}
+
+function buildGeminiTtsRequestBody(params: {
+  model: string;
+  text: string;
+  languageCode: string;
+  targetLanguageName: string;
+  voiceName: string;
+  slow: boolean;
+  includeLanguageCode: boolean;
+  includeSpeechMetadata: boolean;
+}): string {
+  const dialectNote = params.languageCode.toLowerCase().startsWith("pt")
+    ? " using European Portuguese (Portugal) pronunciation, never Brazilian"
+    : "";
+  const style = params.slow
+    ? `Warm, gentle, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} slowly and clearly for a young child.`
+    : `Warm, friendly, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} clearly at a comfortable pace.`;
+
+  const isLegacy25 = params.model.includes("2.5");
+  const voiceConfig =
+    params.voiceName.startsWith("voice_") || params.voiceName.includes("-")
+      ? { voice: params.voiceName }
+      : { prebuiltVoiceConfig: { voiceName: params.voiceName } };
+
+  return JSON.stringify({
+    contents: [
+      {
+        role: "user",
+        parts: [
+          params.includeSpeechMetadata && !isLegacy25
+            ? { text: params.text, speechMetadata: { style } }
+            : { text: params.text },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig,
+        ...(params.includeLanguageCode ? { languageCode: params.languageCode } : {}),
+      },
+    },
+  });
+}
+
+async function fetchGeminiTtsWithFallback(
+  env: Env,
+  params: {
+    model: string;
+    method: "generateContent" | "streamGenerateContent";
+    text: string;
+    languageCode: string;
+    targetLanguageName: string;
+    voiceName: string;
+    slow: boolean;
+  },
+): Promise<{ res: Response | null; status: number }> {
+  const query =
+    params.method === "streamGenerateContent"
+      ? `alt=sse&key=${encodeURIComponent(env.GEMINI_API_KEY)}`
+      : `key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(params.model)}:${params.method}?${query}`;
+
+  let res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: buildGeminiTtsRequestBody({
+      ...params,
+      includeLanguageCode: true,
+      includeSpeechMetadata: true,
+    }),
+  });
+
+  if (!res.ok && res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 404) {
+    const errText = await res.text().catch(() => "");
+    console.error("Gemini TTS API error:", res.status, errText.slice(0, 400));
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: buildGeminiTtsRequestBody({
+        ...params,
+        includeLanguageCode: false,
+        includeSpeechMetadata: !params.model.includes("2.5"),
+      }),
+    });
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error(`Gemini TTS (${params.model}:${params.method}) error:`, res.status, errText.slice(0, 300));
+    return { res: null, status: res.status };
+  }
+
+  return { res, status: 200 };
+}
+
 async function synthesizeWithGeminiTts(
   env: Env,
   params: {
@@ -111,101 +214,117 @@ async function synthesizeWithGeminiTts(
     targetLanguageName: string;
     voiceName: string;
     slow: boolean;
+    prefetch?: boolean;
   },
-): Promise<{ audio: { bytes: Uint8Array; contentType: string } | null; reason?: string }> {
+): Promise<{ audio: { bytes: Uint8Array; contentType: string } | null; reason?: string; status?: number }> {
   if (!env.GEMINI_API_KEY) {
     return { audio: null, reason: "no-gemini-key" };
   }
 
-  const model = env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
+  const models = getGeminiTtsModels(env, !params.prefetch);
+  let lastStatus = 500;
 
-  const dialectNote = params.languageCode.toLowerCase().startsWith("pt")
-    ? " using European Portuguese (Portugal) pronunciation, never Brazilian"
-    : "";
-  const style = params.slow
-    ? `Warm, gentle, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} slowly and clearly for a young child.`
-    : `Warm, friendly, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} clearly at a comfortable pace.`;
-
-  const buildPayload = (includeLanguageCode: boolean) =>
-    JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: params.text,
-              speechMetadata: { style },
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: params.voiceName,
-            },
-          },
-          ...(includeLanguageCode ? { languageCode: params.languageCode } : {}),
-        },
-      },
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i]!;
+    const attempt = await fetchGeminiTtsWithFallback(env, {
+      model,
+      method: "generateContent",
+      ...params,
     });
 
-  let res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: buildPayload(true),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    console.error("Gemini TTS API error:", res.status, errText.slice(0, 400));
-
-    if (res.status >= 400 && res.status < 500) {
-      res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: buildPayload(false),
-      });
-      if (!res.ok) {
-        const retryErrText = await res.text().catch(() => "");
-        console.error("Gemini TTS retry error:", res.status, retryErrText.slice(0, 400));
-        return { audio: null, reason: `gemini-tts-${res.status}` };
+    if (!attempt.res) {
+      lastStatus = attempt.status;
+      if (params.prefetch && attempt.status === 429) {
+        return { audio: null, reason: "gemini-tts-429", status: 429 };
       }
-    } else {
-      return { audio: null, reason: `gemini-tts-${res.status}` };
+      continue;
     }
+
+    const body = (await attempt.res.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            inlineData?: { mimeType?: string; data?: string };
+          }>;
+        };
+      }>;
+    };
+
+    const inline = body.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
+    if (!inline?.data) {
+      console.error(`Gemini TTS (${model}) returned empty audio payload`);
+      lastStatus = 502;
+      continue;
+    }
+
+    const rawBytes = decodeBase64(inline.data);
+    const mime = (inline.mimeType || "audio/wav").toLowerCase();
+
+    // If the model returns headerless PCM (audio/l16), wrap it into a playable WAV container
+    if (mime.includes("l16") || mime.includes("pcm")) {
+      const rateMatch = mime.match(/rate=(\d+)/);
+      const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+      return { audio: { bytes: wrapPcm16AsWav(rawBytes, sampleRate), contentType: "audio/wav" } };
+    }
+
+    return { audio: { bytes: rawBytes, contentType: mime.split(";")[0] || "audio/wav" } };
   }
 
-  const body = (await res.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{
-          inlineData?: { mimeType?: string; data?: string };
-        }>;
-      };
-    }>;
+  return {
+    audio: null,
+    reason: lastStatus === 429 ? "gemini-tts-429" : `gemini-tts-${lastStatus}`,
+    status: lastStatus,
   };
+}
 
-  const inline = body.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData;
-  if (!inline?.data) {
-    console.error("Gemini TTS returned empty audio payload");
-    return { audio: null, reason: "gemini-tts-empty" };
+async function openGeminiTtsStream(
+  env: Env,
+  params: {
+    text: string;
+    languageCode: string;
+    targetLanguageName: string;
+    voiceName: string;
+    slow: boolean;
+  },
+): Promise<{ upstream: Response | null; model?: string; reason?: string; status?: number }> {
+  if (!env.GEMINI_API_KEY) {
+    return { upstream: null, reason: "no-gemini-key" };
   }
-
-  const rawBytes = decodeBase64(inline.data);
-  const mime = (inline.mimeType || "audio/wav").toLowerCase();
-
-  // If the model returns headerless PCM (audio/l16), wrap it into a playable WAV container
-  if (mime.includes("l16") || mime.includes("pcm")) {
-    const rateMatch = mime.match(/rate=(\d+)/);
-    const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
-    return { audio: { bytes: wrapPcm16AsWav(rawBytes, sampleRate), contentType: "audio/wav" } };
+  const models = getGeminiTtsModels(env, true);
+  let lastStatus = 500;
+  for (const model of models) {
+    const attempt = await fetchGeminiTtsWithFallback(env, {
+      model,
+      method: "streamGenerateContent",
+      ...params,
+    });
+    if (attempt.res && attempt.res.body) {
+      return { upstream: attempt.res, model };
+    }
+    lastStatus = attempt.status;
   }
+  return {
+    upstream: null,
+    reason: lastStatus === 429 ? "gemini-tts-429" : `gemini-tts-${lastStatus}`,
+    status: lastStatus,
+  };
+}
 
-  return { audio: { bytes: rawBytes, contentType: mime.split(";")[0] || "audio/wav" } };
+function stripWavHeaderIfPresent(bytes: Uint8Array): Uint8Array {
+  if (
+    bytes.byteLength > 44 &&
+    bytes[0] === 0x52 && // R
+    bytes[1] === 0x49 && // I
+    bytes[2] === 0x46 && // F
+    bytes[3] === 0x46 && // F
+    bytes[8] === 0x57 && // W
+    bytes[9] === 0x41 && // A
+    bytes[10] === 0x56 && // V
+    bytes[11] === 0x45 // E
+  ) {
+    return bytes.subarray(44);
+  }
+  return bytes;
 }
 
 async function synthesizeWithGoogleCloudTts(
@@ -249,43 +368,33 @@ async function synthesizeWithGoogleCloudTts(
 
 const AUDIO_ACCEPT_QUERY = '"application/json"';
 
-async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
-  if (c.req.method === "QUERY") {
-    const contentType = c.req.header("Content-Type")?.toLowerCase() ?? "";
-    if (!contentType) {
-      return c.json({ error: "Content-Type header is required for QUERY requests" }, 400, {
-        "Accept-Query": AUDIO_ACCEPT_QUERY,
-      });
-    }
-    if (!contentType.includes("application/json")) {
-      return c.json({ error: "Unsupported Media Type; expected application/json" }, 415, {
-        "Accept-Query": AUDIO_ACCEPT_QUERY,
-      });
-    }
-  }
-
+async function resolveSpeechRequest(c: import("hono").Context<{ Bindings: Env }>) {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   let rawBody: unknown;
   try {
     rawBody = await c.req.json();
   } catch {
-    return c.json({ error: "Invalid JSON body" }, 400, { "Accept-Query": AUDIO_ACCEPT_QUERY });
+    return { errorResponse: c.json({ error: "Invalid JSON body" }, 400, { "Accept-Query": AUDIO_ACCEPT_QUERY }) };
   }
 
   const parsed = speakSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return c.json({ error: parsed.error.flatten() }, 400, { "Accept-Query": AUDIO_ACCEPT_QUERY });
+    return {
+      errorResponse: c.json({ error: parsed.error.flatten() }, 400, { "Accept-Query": AUDIO_ACCEPT_QUERY }),
+    };
   }
 
   if (!c.env.GEMINI_API_KEY && !c.env.GOOGLE_TTS_API_KEY) {
-    return c.json(
-      { error: "No cloud TTS provider configured; use browser speechSynthesis fallback" },
-      501,
-      {
-        "Accept-Query": AUDIO_ACCEPT_QUERY,
-        "X-Audio-Fallback-Reason": "no-api-key",
-      },
-    );
+    return {
+      errorResponse: c.json(
+        { error: "No cloud TTS provider configured; use browser speechSynthesis fallback" },
+        501,
+        {
+          "Accept-Query": AUDIO_ACCEPT_QUERY,
+          "X-Audio-Fallback-Reason": "no-api-key",
+        },
+      ),
+    };
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
@@ -309,7 +418,37 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     parsed.data.slow ? "slow" : "normal",
     parsed.data.text,
   ]);
-  const contentLocation = `/api/uploads/${cacheKey}`;
+
+  return {
+    data: parsed.data,
+    profile,
+    languageCode,
+    spokenLanguageName,
+    geminiVoice,
+    cacheKey,
+    contentLocation: `/api/uploads/${cacheKey}`,
+  };
+}
+
+async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
+  if (c.req.method === "QUERY") {
+    const contentType = c.req.header("Content-Type")?.toLowerCase() ?? "";
+    if (!contentType) {
+      return c.json({ error: "Content-Type header is required for QUERY requests" }, 400, {
+        "Accept-Query": AUDIO_ACCEPT_QUERY,
+      });
+    }
+    if (!contentType.includes("application/json")) {
+      return c.json({ error: "Unsupported Media Type; expected application/json" }, 415, {
+        "Accept-Query": AUDIO_ACCEPT_QUERY,
+      });
+    }
+  }
+
+  const resolved = await resolveSpeechRequest(c);
+  if (resolved.errorResponse || !resolved.data) return resolved.errorResponse!;
+
+  const { data, profile, languageCode, spokenLanguageName, geminiVoice, cacheKey, contentLocation } = resolved;
 
   // 1. Serve instantly from R2 cache if available
   if (c.env.UPLOADS) {
@@ -328,24 +467,33 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     }
   }
 
-  // 2. Try Gemini 3.8 Flash-Lite TTS (natural human voice using existing GEMINI_API_KEY)
+  // 2. Try Gemini 3.8 TTS (with waterfall fallback across flash-lite -> flash -> 2.5)
   const geminiResult = await synthesizeWithGeminiTts(c.env, {
-    text: parsed.data.text,
+    text: data.text,
     languageCode,
     targetLanguageName: spokenLanguageName,
     voiceName: geminiVoice,
-    slow: parsed.data.slow,
+    slow: data.slow,
+    prefetch: data.prefetch,
   });
   let audio = geminiResult.audio;
   let provider = "gemini-tts";
 
+  if (!audio && data.prefetch && geminiResult.status === 429) {
+    return c.json(
+      { error: "Rate limited during prefetch" },
+      429,
+      { "X-Audio-Fallback-Reason": "gemini-tts-429" },
+    );
+  }
+
   // 3. Fallback to Google Cloud TTS if configured
   if (!audio && c.env.GOOGLE_TTS_API_KEY) {
     audio = await synthesizeWithGoogleCloudTts(c.env, {
-      text: parsed.data.text,
+      text: data.text,
       languageCode,
       voiceName: profile.ttsVoiceName,
-      slow: parsed.data.slow,
+      slow: data.slow,
     });
     provider = "google-cloud-tts";
   }
@@ -396,6 +544,181 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
   });
 }
 
+async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
+  const resolved = await resolveSpeechRequest(c);
+  if (resolved.errorResponse || !resolved.data) return resolved.errorResponse!;
+
+  const { data, profile, languageCode, spokenLanguageName, geminiVoice, cacheKey, contentLocation } = resolved;
+
+  // 1. Instant cached WAV on R2 HIT (zero stream overhead)
+  if (c.env.UPLOADS) {
+    const cached = await c.env.UPLOADS.get(cacheKey);
+    if (cached) {
+      const headers = new Headers();
+      cached.writeHttpMetadata(headers);
+      if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/wav");
+      if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, max-age=2592000");
+      headers.set("Accept-Ranges", "bytes");
+      headers.set("Content-Location", contentLocation);
+      headers.set("X-Audio-Provider", cached.customMetadata?.provider || "gemini-tts");
+      headers.set("X-Audio-Cache", "HIT");
+      return new Response(cached.body, { status: 200, headers });
+    }
+  }
+
+  // 2. Open Gemini SSE stream and emit raw 16-bit LE 24 kHz mono PCM chunks as they arrive
+  const opened = await openGeminiTtsStream(c.env, {
+    text: data.text,
+    languageCode,
+    targetLanguageName: spokenLanguageName,
+    voiceName: geminiVoice,
+    slow: data.slow,
+  });
+
+  if (opened.upstream?.body) {
+    const reader = opened.upstream.body.getReader();
+    const decoder = new TextDecoder();
+    const pcmChunks: Uint8Array[] = [];
+    let sseBuffer = "";
+    let firstChunk = true;
+
+    const pcmStream = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) {
+              // Flush any trailing SSE lines
+              if (sseBuffer.trim()) {
+                for (const line of sseBuffer.split(/\r?\n/)) {
+                  if (!line.startsWith("data:")) continue;
+                  const payload = line.slice(5).trim();
+                  if (!payload || payload === "[DONE]") continue;
+                  try {
+                    const obj = JSON.parse(payload) as {
+                      candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string } }> } }>;
+                    };
+                    for (const part of obj.candidates?.[0]?.content?.parts ?? []) {
+                      if (!part.inlineData?.data) continue;
+                      let raw = decodeBase64(part.inlineData.data);
+                      if (firstChunk) {
+                        raw = stripWavHeaderIfPresent(raw);
+                        firstChunk = false;
+                      }
+                      if (raw.byteLength > 0) {
+                        pcmChunks.push(raw);
+                        controller.enqueue(raw);
+                      }
+                    }
+                  } catch {}
+                }
+              }
+              controller.close();
+              if (c.env.UPLOADS && pcmChunks.length > 0) {
+                const totalLen = pcmChunks.reduce((acc, ch) => acc + ch.byteLength, 0);
+                const fullPcm = new Uint8Array(totalLen);
+                let off = 0;
+                for (const ch of pcmChunks) {
+                  fullPcm.set(ch, off);
+                  off += ch.byteLength;
+                }
+                const wavBytes = wrapPcm16AsWav(fullPcm, 24000);
+                const putPromise = c.env.UPLOADS.put(cacheKey, wavBytes, {
+                  httpMetadata: {
+                    contentType: "audio/wav",
+                    cacheControl: "private, max-age=2592000",
+                  },
+                  customMetadata: {
+                    provider: "gemini-tts",
+                  },
+                });
+                try {
+                  c.executionCtx.waitUntil(putPromise);
+                } catch {}
+              }
+              return;
+            }
+
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split(/\r?\n/);
+            sseBuffer = lines.pop() ?? "";
+            let enqueued = false;
+            for (const line of lines) {
+              if (!line.startsWith("data:")) continue;
+              const payload = line.slice(5).trim();
+              if (!payload || payload === "[DONE]") continue;
+              try {
+                const obj = JSON.parse(payload) as {
+                  candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string } }> } }>;
+                };
+                for (const part of obj.candidates?.[0]?.content?.parts ?? []) {
+                  if (!part.inlineData?.data) continue;
+                  let raw = decodeBase64(part.inlineData.data);
+                  if (firstChunk) {
+                    raw = stripWavHeaderIfPresent(raw);
+                    firstChunk = false;
+                  }
+                  if (raw.byteLength > 0) {
+                    pcmChunks.push(raw);
+                    controller.enqueue(raw);
+                    enqueued = true;
+                  }
+                }
+              } catch {}
+            }
+            if (enqueued) return;
+          }
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+      cancel() {
+        reader.cancel().catch(() => {});
+      },
+    });
+
+    const streamHeaders: Record<string, string> = {
+      "Content-Type": "audio/l16;rate=24000;channels=1",
+      "Cache-Control": "no-store",
+      "X-Audio-Stream": "1",
+      "X-Audio-Provider": "gemini-tts",
+      "X-Audio-Cache": "MISS",
+    };
+    if (c.env.UPLOADS) {
+      streamHeaders["Content-Location"] = contentLocation;
+    }
+
+    return new Response(pcmStream, { status: 200, headers: streamHeaders });
+  }
+
+  // 3. Fallback to Google Cloud TTS if Gemini stream failed
+  if (c.env.GOOGLE_TTS_API_KEY) {
+    const gcAudio = await synthesizeWithGoogleCloudTts(c.env, {
+      text: data.text,
+      languageCode,
+      voiceName: profile.ttsVoiceName,
+      slow: data.slow,
+    });
+    if (gcAudio) {
+      return new Response(gcAudio.bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": gcAudio.contentType,
+          "Content-Length": String(gcAudio.bytes.byteLength),
+          "X-Audio-Provider": "google-cloud-tts",
+          "X-Audio-Cache": "MISS",
+        },
+      });
+    }
+  }
+
+  return c.json(
+    { error: "Cloud TTS unavailable; falling back to device speechSynthesis" },
+    501,
+    { "X-Audio-Fallback-Reason": opened.reason || "provider-unavailable" },
+  );
+}
+
 export const audioRoutes = new Hono<{ Bindings: Env }>();
 
 audioRoutes.on("OPTIONS", "/speak", (c) =>
@@ -406,3 +729,4 @@ audioRoutes.on("OPTIONS", "/speak", (c) =>
 );
 audioRoutes.on("QUERY", "/speak", handleSpeak);
 audioRoutes.post("/speak", handleSpeak);
+audioRoutes.post("/stream", handleStreamSpeak);

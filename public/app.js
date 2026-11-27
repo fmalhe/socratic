@@ -232,9 +232,9 @@
     sharedAudio.playsInline = true;
     sharedAudio.preload = "auto";
 
-    let unlocked = false;
+    let audioCtx = null;
+    let firstHtmlAudioUnlock = false;
     let runId = 0;
-    let supportsQuery = null; // null | true | false
     let currentAbort = null;
     let rafId = 0;
     let browserTimer = 0;
@@ -242,17 +242,43 @@
     let currentState = "idle"; // idle | loading | playing | paused
     let activeKaraokeEls = [];
     let currentBrowserJob = null;
-    const lruCache = new Map(); // cacheKey -> { url, trim }
+    let activeSources = [];
+    let usingHtmlAudio = false;
+    const lruCache = new Map(); // cacheKey -> { buffer, contentType, trim }
+    const persistentCachePromise =
+      typeof caches !== "undefined" ? caches.open("socratic-audio-v1").catch(() => null) : Promise.resolve(null);
+
+    function ensureAudioCtx() {
+      if (audioCtx) return audioCtx;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
+      return audioCtx;
+    }
 
     function unlockSync() {
-      if (unlocked) return;
-      try {
-        sharedAudio.muted = true;
-        sharedAudio.src = SILENT_WAV_URI;
-        const p = sharedAudio.play();
-        if (p && typeof p.catch === "function") p.catch(() => {});
-        unlocked = true;
-      } catch {}
+      const ctx = ensureAudioCtx();
+      if (ctx) {
+        try {
+          if (ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+          }
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+        } catch {}
+      }
+      if (!firstHtmlAudioUnlock) {
+        firstHtmlAudioUnlock = true;
+        try {
+          sharedAudio.muted = true;
+          sharedAudio.src = SILENT_WAV_URI;
+          const p = sharedAudio.play();
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        } catch {}
+      }
     }
 
     function clearKaraokeClasses() {
@@ -262,19 +288,76 @@
       activeKaraokeEls = [];
     }
 
-    function setCache(key, entry) {
+    function setLruCache(key, entry) {
       if (lruCache.has(key)) lruCache.delete(key);
       lruCache.set(key, entry);
-      if (lruCache.size > 40) {
+      if (lruCache.size > 48) {
         const oldestKey = lruCache.keys().next().value;
-        const oldest = lruCache.get(oldestKey);
         lruCache.delete(oldestKey);
-        if (oldest && oldest.url) {
-          try {
-            URL.revokeObjectURL(oldest.url);
-          } catch {}
-        }
       }
+    }
+
+    function cacheRequestUrl(key) {
+      return `https://socratic-cache.local/audio/${encodeURIComponent(key)}`;
+    }
+
+    async function readPersistentCache(key) {
+      const mem = lruCache.get(key);
+      if (mem) return mem;
+      try {
+        const cache = await persistentCachePromise;
+        if (!cache) return null;
+        const match = await cache.match(cacheRequestUrl(key));
+        if (!match) return null;
+        const buffer = await match.arrayBuffer();
+        const contentType = match.headers.get("Content-Type") || "audio/wav";
+        const trim = contentType.includes("wav") ? analyzeWavTrim(buffer) : null;
+        const entry = { buffer, contentType, trim };
+        setLruCache(key, entry);
+        return entry;
+      } catch {
+        return null;
+      }
+    }
+
+    async function writePersistentCache(key, buffer, contentType) {
+      const trim = contentType.includes("wav") ? analyzeWavTrim(buffer) : null;
+      const entry = { buffer, contentType, trim };
+      setLruCache(key, entry);
+      try {
+        const cache = await persistentCachePromise;
+        if (!cache) return entry;
+        await cache.put(
+          cacheRequestUrl(key),
+          new Response(buffer.slice(0), {
+            headers: { "Content-Type": contentType },
+          }),
+        );
+      } catch {}
+      return entry;
+    }
+
+    function buildWavFromPcm16(pcmBytes, sampleRate = 24000) {
+      const wav = new Uint8Array(44 + pcmBytes.byteLength);
+      const view = new DataView(wav.buffer);
+      const writeStr = (off, str) => {
+        for (let i = 0; i < str.length; i++) wav[off + i] = str.charCodeAt(i);
+      };
+      writeStr(0, "RIFF");
+      view.setUint32(4, 36 + pcmBytes.byteLength, true);
+      writeStr(8, "WAVE");
+      writeStr(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, "data");
+      view.setUint32(40, pcmBytes.byteLength, true);
+      wav.set(pcmBytes, 44);
+      return wav.buffer;
     }
 
     function notifyUI() {
@@ -327,7 +410,7 @@
         const totalFrames = Math.floor(dataBytes / bytesPerFrame);
         const totalSec = totalFrames / sampleRate;
         const winFrames = Math.max(1, Math.floor(sampleRate * 0.015));
-        const threshold = 480; // ~1.5% of 16-bit full scale
+        const threshold = 480;
         let firstSpeechFrame = 0;
         let lastSpeechFrame = totalFrames - 1;
         let foundStart = false;
@@ -416,36 +499,15 @@
       );
     }
 
-    async function fetchSpeakAudio(text, languageCode, slow, signal) {
-      const payload = JSON.stringify({ text, languageCode, slow: Boolean(slow) });
-      const headers = { "Content-Type": "application/json" };
-
-      if (supportsQuery !== false) {
+    function stopActiveAudioNodes() {
+      for (const src of activeSources) {
         try {
-          const resQ = await fetch("/api/audio/speak", {
-            method: "QUERY",
-            headers,
-            body: payload,
-            signal,
-          });
-          if (resQ.status === 405 || resQ.status === 502) {
-            supportsQuery = false;
-          } else {
-            supportsQuery = true;
-            return resQ;
-          }
-        } catch (err) {
-          if (err && err.name === "AbortError") throw err;
-          supportsQuery = false;
-        }
+          src.onended = null;
+          src.stop();
+          src.disconnect();
+        } catch {}
       }
-
-      return fetch("/api/audio/speak", {
-        method: "POST",
-        headers,
-        body: payload,
-        signal,
-      });
+      activeSources = [];
     }
 
     function stop() {
@@ -459,6 +521,8 @@
       cancelAnimationFrame(rafId);
       clearInterval(browserTimer);
       currentBrowserJob = null;
+      stopActiveAudioNodes();
+      usingHtmlAudio = false;
       try {
         sharedAudio.pause();
         sharedAudio.onended = null;
@@ -487,6 +551,11 @@
         setState(currentKey, "paused");
         return;
       }
+      if (!usingHtmlAudio && audioCtx && audioCtx.state === "running") {
+        audioCtx.suspend().catch(() => {});
+        setState(currentKey, "paused");
+        return;
+      }
       try {
         sharedAudio.pause();
         cancelAnimationFrame(rafId);
@@ -504,6 +573,11 @@
         job.paused = false;
         setState(currentKey, "playing");
         startBrowserUtterance(job);
+        return;
+      }
+      if (!usingHtmlAudio && audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume().catch(() => {});
+        setState(currentKey, "playing");
         return;
       }
       try {
@@ -536,7 +610,7 @@
 
       const weights = remainingEls.length > 0 ? buildWordWeights(remainingEls) : [];
       const wordCount = Math.max(1, remainingText.split(/\s+/).filter(Boolean).length);
-      const estMs = Math.max(650, (wordCount * (job.slow ? 620 : 410)));
+      const estMs = Math.max(650, wordCount * (job.slow ? 620 : 410));
       const startedAt = performance.now();
       let lastHighlight = -1;
 
@@ -576,6 +650,246 @@
       window.speechSynthesis.speak(utt);
     }
 
+    async function playDecodedAudioBuffer({ myRun, key, cached, onEnded }) {
+      const ctx = ensureAudioCtx();
+      if (ctx) {
+        try {
+          if (ctx.state === "suspended") await ctx.resume();
+          const audioBuf = await ctx.decodeAudioData(cached.buffer.slice(0));
+          if (myRun !== runId) return;
+
+          const src = ctx.createBufferSource();
+          src.buffer = audioBuf;
+          src.connect(ctx.destination);
+          activeSources = [src];
+          usingHtmlAudio = false;
+
+          const dur = audioBuf.duration || 1;
+          const startOffset = cached.trim ? cached.trim.startSec : 0;
+          const endOffset = cached.trim ? Math.min(dur, cached.trim.endSec) : dur;
+          const span = Math.max(0.15, endOffset - startOffset);
+          const wordWeights = activeKaraokeEls.length > 0 ? buildWordWeights(activeKaraokeEls) : [];
+          let lastIdx = -1;
+          const startedCtxTime = ctx.currentTime;
+
+          const tick = () => {
+            if (myRun !== runId) return;
+            if (ctx.state === "running" && activeKaraokeEls.length > 0) {
+              const elapsed = ctx.currentTime - startedCtxTime;
+              const progress = Math.max(0, Math.min(1, (elapsed - startOffset) / span));
+              let idx = wordWeights.findIndex((w) => progress <= w.end);
+              if (idx < 0) idx = wordWeights.length - 1;
+              if (idx !== lastIdx) {
+                lastIdx = idx;
+                applyHighlightIndex(activeKaraokeEls, idx);
+              }
+            }
+            if (currentState === "playing" || currentState === "paused") {
+              rafId = requestAnimationFrame(tick);
+            }
+          };
+
+          src.onended = () => {
+            if (myRun !== runId) return;
+            cancelAnimationFrame(rafId);
+            activeSources = [];
+            clearKaraokeClasses();
+            setState(null, "idle");
+            if (typeof onEnded === "function") onEnded();
+          };
+
+          setState(key, "playing");
+          src.start(0);
+          if (activeKaraokeEls.length > 0) {
+            rafId = requestAnimationFrame(tick);
+          }
+          return;
+        } catch {}
+      }
+
+      // HTMLAudio fallback if Web Audio API decode unavailable
+      usingHtmlAudio = true;
+      const blob = new Blob([cached.buffer], { type: cached.contentType || "audio/wav" });
+      const blobUrl = URL.createObjectURL(blob);
+      sharedAudio.muted = false;
+      sharedAudio.src = blobUrl;
+      const wordWeights = activeKaraokeEls.length > 0 ? buildWordWeights(activeKaraokeEls) : [];
+      let lastIdx = -1;
+
+      const tickHtml = () => {
+        if (myRun !== runId) return;
+        if (!sharedAudio.paused && activeKaraokeEls.length > 0) {
+          const dur = Number.isFinite(sharedAudio.duration) && sharedAudio.duration > 0 ? sharedAudio.duration : 1;
+          const startSec = cached.trim ? cached.trim.startSec : 0;
+          const endSec = cached.trim ? Math.min(dur, cached.trim.endSec) : dur;
+          const span = Math.max(0.15, endSec - startSec);
+          const progress = Math.max(0, Math.min(1, (sharedAudio.currentTime - startSec) / span));
+          let idx = wordWeights.findIndex((w) => progress <= w.end);
+          if (idx < 0) idx = wordWeights.length - 1;
+          if (idx !== lastIdx) {
+            lastIdx = idx;
+            applyHighlightIndex(activeKaraokeEls, idx);
+          }
+        }
+        if (currentState === "playing") rafId = requestAnimationFrame(tickHtml);
+      };
+
+      sharedAudio.onended = () => {
+        URL.revokeObjectURL(blobUrl);
+        if (myRun !== runId) return;
+        cancelAnimationFrame(rafId);
+        clearKaraokeClasses();
+        setState(null, "idle");
+        if (typeof onEnded === "function") onEnded();
+      };
+      sharedAudio.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        if (myRun !== runId) return;
+        cancelAnimationFrame(rafId);
+        clearKaraokeClasses();
+        setState(null, "idle");
+      };
+
+      setState(key, "playing");
+      await sharedAudio.play();
+      if (myRun === runId && activeKaraokeEls.length > 0) {
+        rafId = requestAnimationFrame(tickHtml);
+      }
+    }
+
+    async function playStreamingPcmResponse({ res, myRun, key, cacheKey, resolvedText, slow, onEnded }) {
+      const ctx = ensureAudioCtx();
+      if (!ctx || !res.body) return false;
+      if (ctx.state === "suspended") await ctx.resume();
+
+      const ct = res.headers.get("Content-Type") || "";
+      const rateMatch = ct.match(/rate=(\d+)/i);
+      const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+
+      const reader = res.body.getReader();
+      let leftover = null;
+      let nextStartTime = 0;
+      let streamStartedAt = 0;
+      let streamDone = false;
+      let totalPcmBytes = 0;
+      const recordedChunks = [];
+      activeSources = [];
+      usingHtmlAudio = false;
+
+      const wordWeights = activeKaraokeEls.length > 0 ? buildWordWeights(activeKaraokeEls) : [];
+      const tokenUnits = wordWeights.length > 0 ? wordWeights.length : Math.max(1, resolvedText.split(/\s+/).length);
+      let estDuration = Math.max(0.8, tokenUnits * (slow ? 0.56 : 0.36));
+      let lastIdx = -1;
+
+      const tickStream = () => {
+        if (myRun !== runId) return;
+        if (streamStartedAt > 0 && ctx.state === "running" && activeKaraokeEls.length > 0) {
+          const playedSec = Math.max(0, ctx.currentTime - streamStartedAt);
+          const bufferedSec = totalPcmBytes / (sampleRate * 2);
+          const denom = streamDone ? Math.max(0.25, bufferedSec) : Math.max(estDuration, bufferedSec + 0.15);
+          const progress = Math.max(0, Math.min(1, playedSec / denom));
+          let idx = wordWeights.findIndex((w) => progress <= w.end);
+          if (idx < 0) idx = wordWeights.length - 1;
+          if (idx !== lastIdx) {
+            lastIdx = idx;
+            applyHighlightIndex(activeKaraokeEls, idx);
+          }
+        }
+        if (currentState === "playing" || currentState === "paused") {
+          rafId = requestAnimationFrame(tickStream);
+        }
+      };
+
+      let scheduledAny = false;
+      let lastNode = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (myRun !== runId) {
+          reader.cancel().catch(() => {});
+          return true;
+        }
+        if (done) {
+          streamDone = true;
+          break;
+        }
+        if (!value || value.byteLength === 0) continue;
+
+        let combined;
+        if (leftover !== null) {
+          combined = new Uint8Array(1 + value.byteLength);
+          combined[0] = leftover;
+          combined.set(value, 1);
+          leftover = null;
+        } else {
+          combined = value;
+        }
+
+        const evenLen = combined.byteLength - (combined.byteLength % 2);
+        if (combined.byteLength % 2 === 1) {
+          leftover = combined[combined.byteLength - 1];
+        }
+        if (evenLen <= 0) continue;
+
+        const chunkBytes = combined.subarray(0, evenLen);
+        recordedChunks.push(chunkBytes.slice());
+        totalPcmBytes += chunkBytes.byteLength;
+
+        const sampleCount = evenLen / 2;
+        const floatBuf = ctx.createBuffer(1, sampleCount, sampleRate);
+        const channel = floatBuf.getChannelData(0);
+        const dv = new DataView(chunkBytes.buffer, chunkBytes.byteOffset, chunkBytes.byteLength);
+        for (let i = 0; i < sampleCount; i++) {
+          channel[i] = dv.getInt16(i * 2, true) / 32768;
+        }
+
+        const src = ctx.createBufferSource();
+        src.buffer = floatBuf;
+        src.connect(ctx.destination);
+        const now = ctx.currentTime;
+        if (!scheduledAny) {
+          nextStartTime = now + 0.03;
+          streamStartedAt = nextStartTime;
+          scheduledAny = true;
+          setState(key, "playing");
+          if (activeKaraokeEls.length > 0) rafId = requestAnimationFrame(tickStream);
+        } else if (nextStartTime < now) {
+          nextStartTime = now;
+        }
+        src.start(nextStartTime);
+        nextStartTime += floatBuf.duration;
+        activeSources.push(src);
+        lastNode = src;
+      }
+
+      if (!scheduledAny) return false;
+
+      // Save full WAV in browser CacheStorage so replays are instant
+      if (totalPcmBytes > 0) {
+        const fullPcm = new Uint8Array(totalPcmBytes);
+        let off = 0;
+        for (const ch of recordedChunks) {
+          fullPcm.set(ch, off);
+          off += ch.byteLength;
+        }
+        const wavBuf = buildWavFromPcm16(fullPcm, sampleRate);
+        writePersistentCache(cacheKey, wavBuf, "audio/wav").catch(() => {});
+      }
+
+      if (lastNode) {
+        lastNode.onended = () => {
+          if (myRun !== runId) return;
+          cancelAnimationFrame(rafId);
+          activeSources = [];
+          clearKaraokeClasses();
+          setState(null, "idle");
+          if (typeof onEnded === "function") onEnded();
+        };
+      }
+
+      return true;
+    }
+
     async function speak({ key, text, languageCode = "pt-PT", slow = false, wordEls = [], onBeforeFetch = null, onEnded = null }) {
       if (currentKey === key && (currentState === "playing" || currentState === "loading")) {
         stop();
@@ -604,77 +918,48 @@
         }
 
         const cacheKey = `${languageCode}|${slow ? 1 : 0}|${resolvedText}`;
-        let cached = lruCache.get(cacheKey);
-
-        if (!cached) {
-          const res = await fetchSpeakAudio(resolvedText, languageCode, slow, currentAbort.signal);
-          if (myRun !== runId) return;
-
-          if (res.ok) {
-            const buffer = await res.arrayBuffer();
-            if (myRun !== runId) return;
-            const contentType = res.headers.get("Content-Type") || "audio/wav";
-            const trim = contentType.includes("wav") ? analyzeWavTrim(buffer) : null;
-            const blob = new Blob([buffer], { type: contentType });
-            const url = URL.createObjectURL(blob);
-            cached = { url, trim };
-            setCache(cacheKey, cached);
-          }
-        }
-
+        const cached = await readPersistentCache(cacheKey);
         if (myRun !== runId) return;
 
         if (cached) {
-          sharedAudio.muted = false;
-          sharedAudio.src = cached.url;
-          const wordWeights = activeKaraokeEls.length > 0 ? buildWordWeights(activeKaraokeEls) : [];
-          let lastIdx = -1;
-
-          const tick = () => {
-            if (myRun !== runId) return;
-            if (!sharedAudio.paused && activeKaraokeEls.length > 0) {
-              const dur = Number.isFinite(sharedAudio.duration) && sharedAudio.duration > 0 ? sharedAudio.duration : 1;
-              const startSec = cached.trim ? cached.trim.startSec : 0;
-              const endSec = cached.trim ? Math.min(dur, cached.trim.endSec) : dur;
-              const span = Math.max(0.15, endSec - startSec);
-              const progress = Math.max(0, Math.min(1, (sharedAudio.currentTime - startSec) / span));
-              let idx = wordWeights.findIndex((w) => progress <= w.end);
-              if (idx < 0) idx = wordWeights.length - 1;
-              if (idx !== lastIdx) {
-                lastIdx = idx;
-                applyHighlightIndex(activeKaraokeEls, idx);
-              }
-            }
-            if (currentState === "playing") {
-              rafId = requestAnimationFrame(tick);
-            }
-          };
-
-          sharedAudio.onended = () => {
-            if (myRun !== runId) return;
-            cancelAnimationFrame(rafId);
-            clearKaraokeClasses();
-            setState(null, "idle");
-            if (typeof onEnded === "function") onEnded();
-          };
-
-          sharedAudio.onerror = () => {
-            if (myRun !== runId) return;
-            cancelAnimationFrame(rafId);
-            clearKaraokeClasses();
-            setState(null, "idle");
-          };
-
-          setState(key, "playing");
-          await sharedAudio.play();
-          if (myRun !== runId) return;
-          if (activeKaraokeEls.length > 0) {
-            rafId = requestAnimationFrame(tick);
-          }
+          await playDecodedAudioBuffer({ myRun, key, cached, onEnded });
           return;
         }
 
-        // Cloud TTS returned 501 / unavailable -> use Browser speechSynthesis fallback
+        // Stream directly for low TTFA; hits R2 instantly if already edge-cached
+        const res = await fetch("/api/audio/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: resolvedText, languageCode, slow: Boolean(slow) }),
+          signal: currentAbort.signal,
+        });
+        if (myRun !== runId) return;
+
+        if (res.ok) {
+          const ct = (res.headers.get("Content-Type") || "").toLowerCase();
+          if (ct.includes("l16") || res.headers.get("X-Audio-Stream") === "1") {
+            const streamed = await playStreamingPcmResponse({
+              res,
+              myRun,
+              key,
+              cacheKey,
+              resolvedText,
+              slow,
+              onEnded,
+            });
+            if (streamed || myRun !== runId) return;
+          } else {
+            const buffer = await res.arrayBuffer();
+            if (myRun !== runId) return;
+            const entry = await writePersistentCache(cacheKey, buffer, res.headers.get("Content-Type") || "audio/wav");
+            if (myRun !== runId) return;
+            await playDecodedAudioBuffer({ myRun, key, cached: entry, onEnded });
+            return;
+          }
+        }
+
+        // Fallback to Browser speechSynthesis ONLY if cloud TTS returned 501 / unavailable
+        if (myRun !== runId) return;
         setState(key, "playing");
         currentBrowserJob = {
           myRunId: myRun,
@@ -703,9 +988,81 @@
       stop,
       pause,
       resume,
+      readPersistentCache,
+      writePersistentCache,
       getKey: () => currentKey,
       getState: () => currentState,
     };
+  })();
+
+  // Polite Single-Lane Background Prefetcher (w/ R2 Hit Fast-Path & 429 Cooldown)
+  const PrefetchManager = (() => {
+    let epoch = 0;
+    let queue = [];
+    let running = false;
+    let cooldownUntil = 0;
+
+    function reset() {
+      epoch += 1;
+      queue = [];
+    }
+
+    function enqueue(items) {
+      const valid = (items || []).filter((it) => it && it.text && it.text.trim());
+      if (!valid.length) return;
+      queue.push(...valid);
+      if (!running) processQueue();
+    }
+
+    async function processQueue() {
+      if (running) return;
+      running = true;
+      const myEpoch = epoch;
+      try {
+        while (queue.length > 0 && myEpoch === epoch) {
+          if (Date.now() < cooldownUntil) break;
+          const item = queue.shift();
+          const text = item.text.trim();
+          const lang = item.languageCode || "pt-PT";
+          const slow = Boolean(item.slow);
+          const key = `${lang}|${slow ? 1 : 0}|${text}`;
+
+          const already = await AudioController.readPersistentCache(key);
+          if (already) continue;
+
+          try {
+            const res = await fetch("/api/audio/speak", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text, languageCode: lang, slow, prefetch: true }),
+            });
+            if (myEpoch !== epoch) break;
+            if (res.status === 429) {
+              cooldownUntil = Date.now() + 25000;
+              break;
+            }
+            if (res.ok) {
+              const buffer = await res.arrayBuffer();
+              await AudioController.writePersistentCache(
+                key,
+                buffer,
+                res.headers.get("Content-Type") || "audio/wav",
+              );
+              const isHit = res.headers.get("X-Audio-Cache") === "HIT";
+              await new Promise((r) => setTimeout(r, isHit ? 80 : 1200));
+            } else {
+              await new Promise((r) => setTimeout(r, 800));
+            }
+          } catch {
+            await new Promise((r) => setTimeout(r, 1200));
+          }
+        }
+      } finally {
+        running = false;
+      }
+    }
+
+    return { reset, enqueue };
   })();
 
   function syncAudioButtonsUI() {
@@ -889,11 +1246,21 @@
       });
       meta.row.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
+      const targetLang = state.profile?.targetLanguageCode || "pt-PT";
+      const slow = getSlow();
+      const lookahead = [];
+      for (let j = 1; j <= 2; j++) {
+        if (sentences[startIdx + j]?.targetText) {
+          lookahead.push({ text: sentences[startIdx + j].targetText, languageCode: targetLang, slow });
+        }
+      }
+      PrefetchManager.enqueue(lookahead);
+
       AudioController.speak({
         key: `${keyPrefix}-${startIdx}`,
         text: item.targetText,
-        languageCode: state.profile?.targetLanguageCode || "pt-PT",
-        slow: getSlow(),
+        languageCode: targetLang,
+        slow,
         wordEls: meta.wordSpans,
         onEnded: () => {
           if (autoAdvance && startIdx + 1 < sentences.length) {
@@ -1101,6 +1468,15 @@
         keyPrefix: "passage",
       };
       updateFloatingDock();
+      PrefetchManager.reset();
+      const targetLang = state.profile?.targetLanguageCode || "pt-PT";
+      PrefetchManager.enqueue(
+        passage.sentences.slice(0, 3).map((s) => ({
+          text: s.targetText,
+          languageCode: targetLang,
+          slow: state.hwSlow,
+        })),
+      );
       return;
     }
 
@@ -1230,6 +1606,26 @@
 
     // Ping-Pong Chat Messages
     renderHomeworkChat(ex);
+
+    // Polite background prefetch for instant flag & question playback
+    PrefetchManager.reset();
+    const targetLang = state.profile?.targetLanguageCode || "pt-PT";
+    const nativeLang = state.profile?.nativeLanguageCode || "nb-NO";
+    const queueExerciseAudio = (freshEx) => {
+      PrefetchManager.enqueue([
+        { text: freshEx.promptTarget, languageCode: targetLang, slow: state.hwSlow },
+        { text: freshEx.explanationNative, languageCode: nativeLang, slow: state.hwSlow },
+        { text: freshEx.explanationTarget, languageCode: targetLang, slow: state.hwSlow },
+        { text: freshEx.explanationEnglish, languageCode: "en-US", slow: state.hwSlow },
+        { text: freshEx.promptNative, languageCode: nativeLang, slow: state.hwSlow },
+        { text: freshEx.promptEnglish, languageCode: "en-US", slow: state.hwSlow },
+      ]);
+    };
+    if (!ex.promptNative || !ex.promptEnglish || !ex.explanationTarget || !ex.explanationEnglish) {
+      ensureExerciseHydrated(session, ex).then(queueExerciseAudio).catch(() => {});
+    } else {
+      queueExerciseAudio(ex);
+    }
   }
 
   function renderHomeworkChat(ex) {
@@ -1334,6 +1730,15 @@
     };
 
     updateFloatingDock();
+    PrefetchManager.reset();
+    const targetLang = state.profile?.targetLanguageCode || "pt-PT";
+    PrefetchManager.enqueue(
+      sentences.slice(0, 3).map((s) => ({
+        text: s.targetText,
+        languageCode: targetLang,
+        slow: state.readSlow,
+      })),
+    );
   }
 
   // ======================================================
