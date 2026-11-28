@@ -1,5 +1,7 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { parseJsonBody } from "../lib/http";
 import type { Env, LearnerProfileDto } from "../types";
 
 export const DEFAULT_PROFILE_ID = 1;
@@ -24,7 +26,7 @@ const updateProfileSchema = z.object({
   nativeLanguageCode: z.string().trim().min(1),
   nativeLanguageName: z.string().trim().min(1),
   dialectRules: z.string().trim().min(1),
-  ttsVoiceName: z.string().trim().min(1),
+  ttsVoiceName: z.string().trim().min(1).optional(),
 });
 
 function toDto(row: ProfileRow): LearnerProfileDto {
@@ -45,9 +47,10 @@ export function resolveProfileId(headerValue: string | undefined): number {
   if (!headerValue || !headerValue.trim()) {
     return DEFAULT_PROFILE_ID;
   }
-  const parsed = Number(headerValue.trim());
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid X-Profile-Id header: ${headerValue}`);
+  const trimmed = headerValue.trim();
+  const parsed = Number(trimmed);
+  if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new HTTPException(400, { message: `Invalid X-Profile-Id header: ${headerValue}` });
   }
   return parsed;
 }
@@ -58,7 +61,7 @@ export async function getActiveProfile(db: D1Database, profileId = DEFAULT_PROFI
     .bind(profileId)
     .first<ProfileRow>();
   if (!row) {
-    throw new Error(`Learner profile not found: ${profileId}`);
+    throw new HTTPException(404, { message: `Learner profile not found: ${profileId}` });
   }
   return toDto(row);
 }
@@ -73,11 +76,13 @@ profileRoutes.get("/", async (c) => {
 
 profileRoutes.put("/", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const parsed = updateProfileSchema.safeParse(await c.req.json());
+  const rawBody = await parseJsonBody(c);
+  const parsed = updateProfileSchema.safeParse(rawBody);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten() }, 400);
   }
   const d = parsed.data;
+  const ttsVoiceName = d.ttsVoiceName ?? c.env.GEMINI_TTS_VOICE ?? "Sulafat";
   const result = await c.env.DB.prepare(
     `UPDATE learner_profile
      SET name = ?, age = ?, target_language_code = ?, target_language_name = ?,
@@ -92,7 +97,7 @@ profileRoutes.put("/", async (c) => {
       d.nativeLanguageCode,
       d.nativeLanguageName,
       d.dialectRules,
-      d.ttsVoiceName,
+      ttsVoiceName,
       profileId,
     )
     .run();

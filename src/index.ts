@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
 import { audioRoutes } from "./modules/audio";
 import { homeworkRoutes } from "./modules/homework";
 import { mcpRoutes } from "./modules/mcp";
@@ -59,6 +60,12 @@ app.route("/api/uploads", uploadRoutes);
 app.route("/mcp", mcpRoutes);
 
 app.onError((err, c) => {
+  if (err instanceof HTTPException) {
+    return c.json({ error: err.message }, err.status);
+  }
+  if (err instanceof SyntaxError) {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
   const status = err.message.startsWith("Invalid ") ? 400 : 500;
   return c.json({ error: err.message }, status);
 });

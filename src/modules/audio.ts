@@ -52,7 +52,18 @@ function decodeBase64(b64: string): Uint8Array {
   return bytes;
 }
 
-/** Wraps raw 16-bit signed little-endian mono PCM (24 kHz) in a standard 44-byte RIFF WAV header. */
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+  const totalLen = chunks.reduce((acc, ch) => acc + ch.byteLength, 0);
+  const out = new Uint8Array(totalLen);
+  let off = 0;
+  for (const ch of chunks) {
+    out.set(ch, off);
+    off += ch.byteLength;
+  }
+  return out;
+}
+
+/** Wraps raw 16-bit signed little-endian mono PCM in a standard 44-byte RIFF WAV header. */
 export function wrapPcm16AsWav(pcm: Uint8Array, sampleRate = 24000): Uint8Array {
   const wav = new Uint8Array(44 + pcm.byteLength);
   const view = new DataView(wav.buffer);
@@ -104,6 +115,82 @@ function resolveGeminiVoiceName(profileVoice: string | undefined, envVoice: stri
   return "Sulafat";
 }
 
+const NORWEGIAN_CODES = new Set(["nb", "no", "nn"]);
+
+function baseLanguageSubtag(code: string): string {
+  return code.trim().toLowerCase().split(/[-_]/)[0] || "";
+}
+
+function matchesLanguage(a: string, b: string): boolean {
+  const normA = a.trim().toLowerCase();
+  const normB = b.trim().toLowerCase();
+  if (!normA || !normB) return false;
+  if (normA === normB) return true;
+  const baseA = baseLanguageSubtag(normA);
+  const baseB = baseLanguageSubtag(normB);
+  if (baseA && baseA === baseB) return true;
+  if (NORWEGIAN_CODES.has(baseA) && NORWEGIAN_CODES.has(baseB)) return true;
+  return false;
+}
+
+export function resolveLanguageContext(
+  profile: LearnerProfileDto,
+  requestedLanguageCode?: string | null,
+): {
+  languageCode: string;
+  spokenLanguageName: string;
+  dialectRules: string;
+} {
+  const languageCode = requestedLanguageCode?.trim() || profile.targetLanguageCode;
+  const isTarget = matchesLanguage(languageCode, profile.targetLanguageCode);
+  const isNative = !isTarget && matchesLanguage(languageCode, profile.nativeLanguageCode);
+  const base = baseLanguageSubtag(languageCode);
+  const spokenLanguageName = isTarget
+    ? profile.targetLanguageName
+    : isNative
+      ? profile.nativeLanguageName
+      : base === "en"
+        ? "English"
+        : languageCode;
+  const dialectRules = isTarget ? profile.dialectRules.trim() : "";
+  return { languageCode, spokenLanguageName, dialectRules };
+}
+
+function buildGeminiCacheKey(
+  env: Env,
+  profile: LearnerProfileDto,
+  geminiVoice: string,
+  languageCode: string,
+  slow: boolean,
+  text: string,
+): Promise<string> {
+  return computeAudioCacheKey([
+    "gemini-tts",
+    env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts",
+    geminiVoice,
+    profile.ttsVoiceName,
+    profile.dialectRules,
+    languageCode,
+    slow ? "slow" : "normal",
+    text,
+  ]);
+}
+
+function buildGoogleCloudCacheKey(
+  profile: LearnerProfileDto,
+  languageCode: string,
+  slow: boolean,
+  text: string,
+): Promise<string> {
+  return computeAudioCacheKey([
+    "google-cloud-tts",
+    resolveCloudTtsVoiceName(languageCode, profile.ttsVoiceName) || "default",
+    languageCode,
+    slow ? "slow" : "normal",
+    text,
+  ]);
+}
+
 function getGeminiTtsModels(env: Env, includeFallbacks: boolean): string[] {
   const primary = env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts";
   if (!includeFallbacks) return [primary];
@@ -116,17 +203,18 @@ function buildGeminiTtsRequestBody(params: {
   text: string;
   languageCode: string;
   targetLanguageName: string;
+  dialectRules?: string;
   voiceName: string;
   slow: boolean;
   includeLanguageCode: boolean;
   includeSpeechMetadata: boolean;
 }): string {
-  const dialectNote = params.languageCode.toLowerCase().startsWith("pt")
-    ? " using European Portuguese (Portugal) pronunciation, never Brazilian"
+  const dialectNote = params.dialectRules?.trim()
+    ? ` Strictly follow these dialect/pronunciation rules: ${params.dialectRules.trim()}`
     : "";
   const style = params.slow
-    ? `Warm, gentle, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} slowly and clearly for a young child.`
-    : `Warm, friendly, natural children's tutor speaking ${params.targetLanguageName}${dialectNote} clearly at a comfortable pace.`;
+    ? `Warm, gentle, natural children's tutor speaking ${params.targetLanguageName} slowly and clearly for a young child.${dialectNote}`
+    : `Warm, friendly, natural children's tutor speaking ${params.targetLanguageName} clearly at a comfortable pace.${dialectNote}`;
 
   const isLegacy25 = params.model.includes("2.5");
   const voiceConfig =
@@ -163,6 +251,7 @@ async function fetchGeminiTtsWithFallback(
     text: string;
     languageCode: string;
     targetLanguageName: string;
+    dialectRules?: string;
     voiceName: string;
     slow: boolean;
   },
@@ -217,6 +306,7 @@ async function synthesizeWithGeminiTts(
     text: string;
     languageCode: string;
     targetLanguageName: string;
+    dialectRules?: string;
     voiceName: string;
     slow: boolean;
     prefetch?: boolean;
@@ -267,12 +357,11 @@ async function synthesizeWithGeminiTts(
 
     // If the model returns headerless PCM (audio/l16), wrap it into a playable WAV container
     if (mime.includes("l16") || mime.includes("pcm")) {
-      const rateMatch = mime.match(/rate=(\d+)/);
-      const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+      const sampleRate = parseSampleRate(mime, 24000);
       return { audio: { bytes: wrapPcm16AsWav(rawBytes, sampleRate), contentType: "audio/wav" } };
     }
 
-    return { audio: { bytes: rawBytes, contentType: mime.split(";")[0] || "audio/wav" } };
+    return { audio: { bytes: rawBytes, contentType: mime.split(";")[0]?.trim() || "audio/wav" } };
   }
 
   return {
@@ -288,6 +377,7 @@ async function openGeminiTtsStream(
     text: string;
     languageCode: string;
     targetLanguageName: string;
+    dialectRules?: string;
     voiceName: string;
     slow: boolean;
   },
@@ -315,31 +405,166 @@ async function openGeminiTtsStream(
   };
 }
 
-function stripWavHeaderIfPresent(bytes: Uint8Array): Uint8Array {
+export interface WavHeaderInfo {
+  audioFormat: number;
+  channels: number;
+  sampleRate: number;
+  bitsPerSample: number;
+  dataStart: number;
+  dataEnd: number;
+}
+
+export function parseWavHeader(bytes: Uint8Array): WavHeaderInfo | null {
+  if (bytes.byteLength < 12) return null;
   if (
-    bytes.byteLength > 44 &&
-    bytes[0] === 0x52 && // R
-    bytes[1] === 0x49 && // I
-    bytes[2] === 0x46 && // F
-    bytes[3] === 0x46 && // F
-    bytes[8] === 0x57 && // W
-    bytes[9] === 0x41 && // A
-    bytes[10] === 0x56 && // V
-    bytes[11] === 0x45 // E
+    bytes[0] !== 0x52 || // R
+    bytes[1] !== 0x49 || // I
+    bytes[2] !== 0x46 || // F
+    bytes[3] !== 0x46 || // F
+    bytes[8] !== 0x57 || // W
+    bytes[9] !== 0x41 || // A
+    bytes[10] !== 0x56 || // V
+    bytes[11] !== 0x45 // E
   ) {
-    return bytes.subarray(44);
+    return null;
   }
-  return bytes;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let audioFormat = 0;
+  let channels = 0;
+  let sampleRate = 0;
+  let bitsPerSample = 0;
+  let offset = 12;
+
+  while (offset + 8 <= bytes.byteLength) {
+    const chunkId = String.fromCharCode(
+      bytes[offset]!,
+      bytes[offset + 1]!,
+      bytes[offset + 2]!,
+      bytes[offset + 3]!,
+    );
+    const chunkSize = view.getUint32(offset + 4, true);
+
+    if (chunkId === "fmt " && offset + 24 <= bytes.byteLength) {
+      audioFormat = view.getUint16(offset + 8, true);
+      channels = view.getUint16(offset + 10, true);
+      sampleRate = view.getUint32(offset + 12, true);
+      bitsPerSample = view.getUint16(offset + 22, true);
+    }
+
+    if (chunkId === "data") {
+      const dataStart = offset + 8;
+      const dataEnd = Math.min(bytes.byteLength, dataStart + chunkSize);
+      return {
+        audioFormat,
+        channels,
+        sampleRate,
+        bitsPerSample,
+        dataStart,
+        dataEnd,
+      };
+    }
+
+    const paddedSize = chunkSize + (chunkSize % 2);
+    if (paddedSize > bytes.byteLength - (offset + 8)) {
+      break;
+    }
+    offset += 8 + paddedSize;
+  }
+
+  // Truncated RIFF/WAVE header without a "data" subchunk
+  return {
+    audioFormat,
+    channels,
+    sampleRate,
+    bitsPerSample,
+    dataStart: bytes.byteLength,
+    dataEnd: bytes.byteLength,
+  };
+}
+
+export function stripWavHeaderIfPresent(bytes: Uint8Array): Uint8Array {
+  const wav = parseWavHeader(bytes);
+  if (!wav) return bytes;
+  if (wav.dataStart >= wav.dataEnd) return new Uint8Array(0);
+  return bytes.subarray(wav.dataStart, wav.dataEnd);
+}
+
+type ParsedAudioPart =
+  | { kind: "pcm"; sampleRate: number }
+  | { kind: "wav-pcm"; sampleRate: number }
+  | { kind: "buffered"; contentType: string };
+
+function parseSampleRate(mime: string, fallback = 24000): number {
+  const match = mime.match(/(?:^|[;\s])rate=(\d+)/i);
+  if (!match) return fallback;
+  const rate = Number(match[1]);
+  return Number.isFinite(rate) && rate >= 8000 && rate <= 192000 ? rate : fallback;
+}
+
+function parseAudioPartMime(
+  mimeType: string | undefined,
+  rawBytes: Uint8Array,
+  isFirstChunk: boolean,
+  activeSampleRate = 24000,
+): ParsedAudioPart {
+  const mime = (mimeType || "").trim().toLowerCase();
+  if (!mime || mime.includes("l16") || mime.includes("pcm")) {
+    return { kind: "pcm", sampleRate: parseSampleRate(mime, activeSampleRate) };
+  }
+  if (mime.includes("wav")) {
+    if (isFirstChunk) {
+      const wav = parseWavHeader(rawBytes);
+      if (!wav) {
+        return { kind: "wav-pcm", sampleRate: parseSampleRate(mime, activeSampleRate) };
+      }
+      if (wav.audioFormat === 1 && wav.channels === 1 && wav.bitsPerSample === 16) {
+        const rate =
+          wav.sampleRate >= 8000 && wav.sampleRate <= 192000
+            ? wav.sampleRate
+            : parseSampleRate(mime, activeSampleRate);
+        return { kind: "wav-pcm", sampleRate: rate };
+      }
+      return { kind: "buffered", contentType: "audio/wav" };
+    }
+    return { kind: "pcm", sampleRate: activeSampleRate };
+  }
+  const cleanContentType = mime.split(";")[0]?.trim() || "application/octet-stream";
+  return { kind: "buffered", contentType: cleanContentType };
+}
+
+function extractSseAudioParts(line: string): Array<{ data: string; mimeType?: string }> {
+  if (!line.startsWith("data:")) return [];
+  const payload = line.slice(5).trim();
+  if (!payload || payload === "[DONE]") return [];
+  try {
+    const obj = JSON.parse(payload) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+      }>;
+    };
+    const out: Array<{ data: string; mimeType?: string }> = [];
+    for (const part of obj.candidates?.[0]?.content?.parts ?? []) {
+      if (part.inlineData?.data) {
+        out.push({ data: part.inlineData.data, mimeType: part.inlineData.mimeType });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 function resolveCloudTtsVoiceName(languageCode: string, profileVoice: string): string {
   const lc = languageCode.toLowerCase();
+  const pvLower = profileVoice.toLowerCase();
   if (
     LEGACY_CLOUD_TTS_VOICE.test(profileVoice) &&
-    profileVoice.toLowerCase().startsWith(lc.split("-")[0]!)
+    (pvLower.startsWith(lc) || (!lc.includes("-") && pvLower.startsWith(`${lc}-`)))
   ) {
     return profileVoice;
   }
+  if (lc.startsWith("pt-br")) return "pt-BR-Wavenet-A";
   if (lc.startsWith("pt")) return "pt-PT-Wavenet-A";
   if (lc.startsWith("nb") || lc.startsWith("no") || lc.startsWith("nn")) return "nb-NO-Wavenet-E";
   if (lc.startsWith("en-gb")) return "en-GB-Neural2-A";
@@ -423,36 +648,59 @@ async function resolveSpeechRequest(c: import("hono").Context<{ Bindings: Env }>
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const languageCode = parsed.data.languageCode || profile.targetLanguageCode;
-  const lc = languageCode.toLowerCase();
-  const nativeLc = profile.nativeLanguageCode.toLowerCase();
-  const spokenLanguageName =
-    lc === nativeLc || lc.startsWith("nb") || lc.startsWith("no") || lc.startsWith("nn")
-      ? profile.nativeLanguageName
-      : lc.startsWith("en")
-        ? "English"
-        : lc.startsWith("pt")
-          ? profile.targetLanguageName
-          : languageCode;
+  const { languageCode, spokenLanguageName, dialectRules } = resolveLanguageContext(
+    profile,
+    parsed.data.languageCode,
+  );
   const geminiVoice = resolveGeminiVoiceName(profile.ttsVoiceName, c.env.GEMINI_TTS_VOICE);
-  const cacheKey = await computeAudioCacheKey([
-    c.env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts",
+  const geminiCacheKey = await buildGeminiCacheKey(
+    c.env,
+    profile,
     geminiVoice,
-    profile.ttsVoiceName,
     languageCode,
-    parsed.data.slow ? "slow" : "normal",
+    parsed.data.slow,
     parsed.data.text,
-  ]);
+  );
+  const googleCacheKey = await buildGoogleCloudCacheKey(
+    profile,
+    languageCode,
+    parsed.data.slow,
+    parsed.data.text,
+  );
 
   return {
     data: parsed.data,
     profile,
     languageCode,
     spokenLanguageName,
+    dialectRules,
     geminiVoice,
-    cacheKey,
-    contentLocation: `/api/uploads/${cacheKey}`,
+    geminiCacheKey,
+    googleCacheKey,
+    geminiContentLocation: `/api/uploads/${geminiCacheKey}`,
+    googleContentLocation: `/api/uploads/${googleCacheKey}`,
   };
+}
+
+function buildCachedAudioResponse(
+  cached: R2ObjectBody,
+  contentLocation: string,
+  defaultContentType: string,
+  defaultProvider: string,
+  includeAcceptQuery: boolean,
+): Response {
+  const headers = new Headers();
+  cached.writeHttpMetadata(headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", defaultContentType);
+  if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, max-age=2592000");
+  headers.set("Accept-Ranges", "bytes");
+  if (includeAcceptQuery) {
+    headers.set("Accept-Query", AUDIO_ACCEPT_QUERY);
+  }
+  headers.set("Content-Location", contentLocation);
+  headers.set("X-Audio-Provider", cached.customMetadata?.provider || defaultProvider);
+  headers.set("X-Audio-Cache", "HIT");
+  return new Response(cached.body, { status: 200, headers });
 }
 
 async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
@@ -473,22 +721,24 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
   const resolved = await resolveSpeechRequest(c);
   if (resolved.errorResponse || !resolved.data) return resolved.errorResponse!;
 
-  const { data, profile, languageCode, spokenLanguageName, geminiVoice, cacheKey, contentLocation } = resolved;
+  const {
+    data,
+    profile,
+    languageCode,
+    spokenLanguageName,
+    dialectRules,
+    geminiVoice,
+    geminiCacheKey,
+    googleCacheKey,
+    geminiContentLocation,
+    googleContentLocation,
+  } = resolved;
 
-  // 1. Serve instantly from R2 cache if available
-  if (c.env.UPLOADS) {
-    const cached = await c.env.UPLOADS.get(cacheKey);
-    if (cached) {
-      const headers = new Headers();
-      cached.writeHttpMetadata(headers);
-      if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/wav");
-      if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, max-age=2592000");
-      headers.set("Accept-Ranges", "bytes");
-      headers.set("Accept-Query", AUDIO_ACCEPT_QUERY);
-      headers.set("Content-Location", contentLocation);
-      headers.set("X-Audio-Provider", cached.customMetadata?.provider || "gemini-tts");
-      headers.set("X-Audio-Cache", "HIT");
-      return new Response(cached.body, { status: 200, headers });
+  // 1. Serve instantly from Gemini R2 cache if available (ignore any foreign-provider object)
+  if (c.env.UPLOADS && c.env.GEMINI_API_KEY) {
+    const cached = await c.env.UPLOADS.get(geminiCacheKey);
+    if (cached && cached.customMetadata?.provider !== "google-cloud-tts") {
+      return buildCachedAudioResponse(cached, geminiContentLocation, "audio/wav", "gemini-tts", true);
     }
   }
 
@@ -497,12 +747,15 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     text: data.text,
     languageCode,
     targetLanguageName: spokenLanguageName,
+    dialectRules,
     voiceName: geminiVoice,
     slow: data.slow,
     prefetch: data.prefetch,
   });
   let audio = geminiResult.audio;
   let provider = "gemini-tts";
+  let targetCacheKey = geminiCacheKey;
+  let targetContentLocation = geminiContentLocation;
 
   if (!audio && data.prefetch && geminiResult.status === 429) {
     return c.json(
@@ -512,8 +765,20 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     );
   }
 
-  // 3. Fallback to Google Cloud TTS if configured
+  // 3. Fallback to Google Cloud TTS under its isolated R2 namespace
   if (!audio && c.env.GOOGLE_TTS_API_KEY) {
+    if (c.env.UPLOADS) {
+      const cachedFallback = await c.env.UPLOADS.get(googleCacheKey);
+      if (cachedFallback) {
+        return buildCachedAudioResponse(
+          cachedFallback,
+          googleContentLocation,
+          "audio/mpeg",
+          "google-cloud-tts",
+          true,
+        );
+      }
+    }
     audio = await synthesizeWithGoogleCloudTts(c.env, {
       text: data.text,
       languageCode,
@@ -521,6 +786,8 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
       slow: data.slow,
     });
     provider = "google-cloud-tts";
+    targetCacheKey = googleCacheKey;
+    targetContentLocation = googleContentLocation;
   }
 
   if (!audio) {
@@ -544,10 +811,10 @@ async function handleSpeak(c: import("hono").Context<{ Bindings: Env }>) {
     "X-Audio-Cache": "MISS",
   };
 
-  // 4. Cache in R2 so replays are instant and addressable via Content-Location
+  // 4. Cache in R2 under the matching provider namespace
   if (c.env.UPLOADS) {
-    responseHeaders["Content-Location"] = contentLocation;
-    const putPromise = c.env.UPLOADS.put(cacheKey, audio.bytes, {
+    responseHeaders["Content-Location"] = targetContentLocation;
+    const putPromise = c.env.UPLOADS.put(targetCacheKey, audio.bytes, {
       httpMetadata: {
         contentType: audio.contentType,
         cacheControl: "private, max-age=2592000",
@@ -573,29 +840,33 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
   const resolved = await resolveSpeechRequest(c);
   if (resolved.errorResponse || !resolved.data) return resolved.errorResponse!;
 
-  const { data, profile, languageCode, spokenLanguageName, geminiVoice, cacheKey, contentLocation } = resolved;
+  const {
+    data,
+    profile,
+    languageCode,
+    spokenLanguageName,
+    dialectRules,
+    geminiVoice,
+    geminiCacheKey,
+    googleCacheKey,
+    geminiContentLocation,
+    googleContentLocation,
+  } = resolved;
 
-  // 1. Instant cached WAV on R2 HIT (zero stream overhead)
-  if (c.env.UPLOADS) {
-    const cached = await c.env.UPLOADS.get(cacheKey);
-    if (cached) {
-      const headers = new Headers();
-      cached.writeHttpMetadata(headers);
-      if (!headers.has("Content-Type")) headers.set("Content-Type", "audio/wav");
-      if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, max-age=2592000");
-      headers.set("Accept-Ranges", "bytes");
-      headers.set("Content-Location", contentLocation);
-      headers.set("X-Audio-Provider", cached.customMetadata?.provider || "gemini-tts");
-      headers.set("X-Audio-Cache", "HIT");
-      return new Response(cached.body, { status: 200, headers });
+  // 1. Instant cached WAV on Gemini R2 HIT (zero stream overhead; ignore any foreign-provider object)
+  if (c.env.UPLOADS && c.env.GEMINI_API_KEY) {
+    const cached = await c.env.UPLOADS.get(geminiCacheKey);
+    if (cached && cached.customMetadata?.provider !== "google-cloud-tts") {
+      return buildCachedAudioResponse(cached, geminiContentLocation, "audio/wav", "gemini-tts", false);
     }
   }
 
-  // 2. Open Gemini SSE stream and emit raw 16-bit LE 24 kHz mono PCM chunks as they arrive
+  // 2. Open Gemini SSE stream and inspect the first audio part before sending response headers
   const opened = await openGeminiTtsStream(c.env, {
     text: data.text,
     languageCode,
     targetLanguageName: spokenLanguageName,
+    dialectRules,
     voiceName: geminiVoice,
     slow: data.slow,
   });
@@ -603,121 +874,322 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
   if (opened.upstream?.body) {
     const reader = opened.upstream.body.getReader();
     const decoder = new TextDecoder();
-    const pcmChunks: Uint8Array[] = [];
     let sseBuffer = "";
-    let firstChunk = true;
+    let upstreamDone = false;
+    const streamState: {
+      mode: "unknown" | "pcm" | "buffered";
+      sampleRate: number;
+      bufferedContentType: string;
+      firstChunk: boolean;
+    } = {
+      mode: "unknown",
+      sampleRate: 24000,
+      bufferedContentType: "application/octet-stream",
+      firstChunk: true,
+    };
+    const initialPcmChunks: Uint8Array[] = [];
+    const bufferedChunks: Uint8Array[] = [];
+    let preReadAborted = false;
 
-    const pcmStream = new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) {
-              // Flush any trailing SSE lines
-              if (sseBuffer.trim()) {
-                for (const line of sseBuffer.split(/\r?\n/)) {
-                  if (!line.startsWith("data:")) continue;
-                  const payload = line.slice(5).trim();
-                  if (!payload || payload === "[DONE]") continue;
-                  try {
-                    const obj = JSON.parse(payload) as {
-                      candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string } }> } }>;
-                    };
-                    for (const part of obj.candidates?.[0]?.content?.parts ?? []) {
-                      if (!part.inlineData?.data) continue;
-                      let raw = decodeBase64(part.inlineData.data);
-                      if (firstChunk) {
-                        raw = stripWavHeaderIfPresent(raw);
-                        firstChunk = false;
-                      }
-                      if (raw.byteLength > 0) {
-                        pcmChunks.push(raw);
-                        controller.enqueue(raw);
-                      }
-                    }
-                  } catch {}
-                }
+    const processParts = (
+      parts: Array<{ data: string; mimeType?: string }>,
+      targetPcm: Uint8Array[],
+      onEnqueue?: (chunk: Uint8Array) => void,
+    ): boolean => {
+      for (const part of parts) {
+        const raw = decodeBase64(part.data);
+        if (streamState.mode === "unknown") {
+          const parsedMime = parseAudioPartMime(part.mimeType, raw, true, 24000);
+          if (parsedMime.kind === "buffered") {
+            streamState.mode = "buffered";
+            streamState.bufferedContentType = parsedMime.contentType;
+            streamState.firstChunk = false;
+            if (raw.byteLength > 0) bufferedChunks.push(raw);
+            continue;
+          }
+          streamState.mode = "pcm";
+          streamState.sampleRate = parsedMime.sampleRate;
+          const pcm = stripWavHeaderIfPresent(raw);
+          streamState.firstChunk = false;
+          if (pcm.byteLength > 0) {
+            targetPcm.push(pcm);
+            onEnqueue?.(pcm);
+          }
+          continue;
+        }
+
+        if (streamState.mode === "buffered") {
+          if (raw.byteLength > 0) bufferedChunks.push(raw);
+          continue;
+        }
+
+        const parsedMime = parseAudioPartMime(part.mimeType, raw, false, streamState.sampleRate);
+        if (parsedMime.kind === "buffered") {
+          return false;
+        }
+        const shouldStrip =
+          streamState.firstChunk ||
+          Boolean(part.mimeType && part.mimeType.toLowerCase().includes("wav"));
+        const pcm = shouldStrip ? stripWavHeaderIfPresent(raw) : raw;
+        streamState.firstChunk = false;
+        if (pcm.byteLength > 0) {
+          targetPcm.push(pcm);
+          onEnqueue?.(pcm);
+        }
+      }
+      return true;
+    };
+
+    try {
+      while (!upstreamDone) {
+        const { value, done } = await reader.read();
+        if (done) {
+          upstreamDone = true;
+          if (sseBuffer.trim()) {
+            for (const line of sseBuffer.split(/\r?\n/)) {
+              if (!processParts(extractSseAudioParts(line), initialPcmChunks)) {
+                preReadAborted = true;
+                break;
               }
-              controller.close();
-              if (c.env.UPLOADS && pcmChunks.length > 0) {
-                const totalLen = pcmChunks.reduce((acc, ch) => acc + ch.byteLength, 0);
-                const fullPcm = new Uint8Array(totalLen);
-                let off = 0;
-                for (const ch of pcmChunks) {
-                  fullPcm.set(ch, off);
-                  off += ch.byteLength;
-                }
-                const wavBytes = wrapPcm16AsWav(fullPcm, 24000);
-                const putPromise = c.env.UPLOADS.put(cacheKey, wavBytes, {
-                  httpMetadata: {
-                    contentType: "audio/wav",
-                    cacheControl: "private, max-age=2592000",
-                  },
-                  customMetadata: {
-                    provider: "gemini-tts",
-                  },
-                });
-                try {
-                  c.executionCtx.waitUntil(putPromise);
-                } catch {}
+            }
+          }
+          sseBuffer = "";
+          break;
+        }
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split(/\r?\n/);
+        sseBuffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!processParts(extractSseAudioParts(line), initialPcmChunks)) {
+            preReadAborted = true;
+            break;
+          }
+        }
+        if (preReadAborted) break;
+        if (
+          streamState.mode === "buffered" ||
+          (streamState.mode === "pcm" && initialPcmChunks.length > 0)
+        ) {
+          break;
+        }
+      }
+    } catch {
+      preReadAborted = true;
+    }
+
+    if (preReadAborted) {
+      await reader.cancel().catch(() => {});
+    } else if (streamState.mode === "buffered") {
+      try {
+        while (!upstreamDone) {
+          const { value, done } = await reader.read();
+          if (done) {
+            upstreamDone = true;
+            if (sseBuffer.trim()) {
+              for (const line of sseBuffer.split(/\r?\n/)) {
+                processParts(extractSseAudioParts(line), initialPcmChunks);
+              }
+            }
+            break;
+          }
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split(/\r?\n/);
+          sseBuffer = lines.pop() ?? "";
+          for (const line of lines) {
+            processParts(extractSseAudioParts(line), initialPcmChunks);
+          }
+        }
+      } catch {
+        await reader.cancel().catch(() => {});
+      }
+
+      const fullBytes = concatBytes(bufferedChunks);
+      if (fullBytes.byteLength > 0) {
+        const headers: Record<string, string> = {
+          "Content-Type": streamState.bufferedContentType,
+          "Content-Length": String(fullBytes.byteLength),
+          "Cache-Control": "private, max-age=2592000",
+          "Accept-Ranges": "bytes",
+          "X-Audio-Provider": "gemini-tts",
+          "X-Audio-Cache": "MISS",
+        };
+        if (c.env.UPLOADS) {
+          headers["Content-Location"] = geminiContentLocation;
+          const putPromise = c.env.UPLOADS.put(geminiCacheKey, fullBytes, {
+            httpMetadata: {
+              contentType: streamState.bufferedContentType,
+              cacheControl: "private, max-age=2592000",
+            },
+            customMetadata: {
+              provider: "gemini-tts",
+            },
+          });
+          try {
+            c.executionCtx.waitUntil(putPromise);
+          } catch {
+            await putPromise;
+          }
+        }
+        return new Response(fullBytes, { status: 200, headers });
+      }
+    } else if (streamState.mode === "pcm" && initialPcmChunks.length > 0) {
+      let resolveCacheWrite!: () => void;
+      let cacheWriteSettled = false;
+      const cacheWriteDone = new Promise<void>((resolve) => {
+        resolveCacheWrite = resolve;
+      });
+      const settleCacheWrite = () => {
+        if (!cacheWriteSettled) {
+          cacheWriteSettled = true;
+          resolveCacheWrite();
+        }
+      };
+
+      let hasExecutionCtx = false;
+      if (c.env.UPLOADS) {
+        try {
+          c.executionCtx.waitUntil(cacheWriteDone);
+          hasExecutionCtx = true;
+        } catch {
+          hasExecutionCtx = false;
+        }
+      } else {
+        settleCacheWrite();
+      }
+
+      const pcmChunks: Uint8Array[] = [...initialPcmChunks];
+      let initialFlushed = false;
+      let streamAborted = false;
+      let putStarted = false;
+
+      const finalizeAndClose = async (controller: ReadableStreamDefaultController<Uint8Array>) => {
+        if (c.env.UPLOADS && pcmChunks.length > 0 && !streamAborted && !putStarted) {
+          putStarted = true;
+          const wavBytes = wrapPcm16AsWav(concatBytes(pcmChunks), streamState.sampleRate);
+          const putPromise = c.env.UPLOADS.put(geminiCacheKey, wavBytes, {
+            httpMetadata: {
+              contentType: "audio/wav",
+              cacheControl: "private, max-age=2592000",
+            },
+            customMetadata: {
+              provider: "gemini-tts",
+            },
+          })
+            .catch((err) => {
+              console.error("R2 stream cache put failed:", err);
+            })
+            .finally(settleCacheWrite);
+
+          if (!hasExecutionCtx) {
+            await putPromise;
+          }
+        } else {
+          settleCacheWrite();
+        }
+        controller.close();
+      };
+
+      const pcmStream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            if (!initialFlushed) {
+              initialFlushed = true;
+              for (const chunk of initialPcmChunks) {
+                controller.enqueue(chunk);
+              }
+              if (upstreamDone) {
+                await finalizeAndClose(controller);
               }
               return;
             }
 
-            sseBuffer += decoder.decode(value, { stream: true });
-            const lines = sseBuffer.split(/\r?\n/);
-            sseBuffer = lines.pop() ?? "";
-            let enqueued = false;
-            for (const line of lines) {
-              if (!line.startsWith("data:")) continue;
-              const payload = line.slice(5).trim();
-              if (!payload || payload === "[DONE]") continue;
-              try {
-                const obj = JSON.parse(payload) as {
-                  candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string } }> } }>;
-                };
-                for (const part of obj.candidates?.[0]?.content?.parts ?? []) {
-                  if (!part.inlineData?.data) continue;
-                  let raw = decodeBase64(part.inlineData.data);
-                  if (firstChunk) {
-                    raw = stripWavHeaderIfPresent(raw);
-                    firstChunk = false;
-                  }
-                  if (raw.byteLength > 0) {
-                    pcmChunks.push(raw);
-                    controller.enqueue(raw);
-                    enqueued = true;
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) {
+                upstreamDone = true;
+                if (sseBuffer.trim()) {
+                  for (const line of sseBuffer.split(/\r?\n/)) {
+                    const ok = processParts(extractSseAudioParts(line), pcmChunks, (chunk) => {
+                      controller.enqueue(chunk);
+                    });
+                    if (!ok) {
+                      streamAborted = true;
+                      settleCacheWrite();
+                      await reader.cancel().catch(() => {});
+                      controller.error(new Error("Unexpected non-PCM chunk in PCM stream"));
+                      return;
+                    }
                   }
                 }
-              } catch {}
+                await finalizeAndClose(controller);
+                return;
+              }
+
+              sseBuffer += decoder.decode(value, { stream: true });
+              const lines = sseBuffer.split(/\r?\n/);
+              sseBuffer = lines.pop() ?? "";
+              let enqueued = false;
+              for (const line of lines) {
+                const ok = processParts(extractSseAudioParts(line), pcmChunks, (chunk) => {
+                  controller.enqueue(chunk);
+                  enqueued = true;
+                });
+                if (!ok) {
+                  streamAborted = true;
+                  settleCacheWrite();
+                  await reader.cancel().catch(() => {});
+                  controller.error(new Error("Unexpected non-PCM chunk in PCM stream"));
+                  return;
+                }
+              }
+              if (enqueued) return;
             }
-            if (enqueued) return;
+          } catch (err) {
+            streamAborted = true;
+            settleCacheWrite();
+            controller.error(err);
           }
-        } catch (err) {
-          controller.error(err);
-        }
-      },
-      cancel() {
-        reader.cancel().catch(() => {});
-      },
-    });
+        },
+        cancel() {
+          streamAborted = true;
+          reader.cancel().catch(() => {});
+          settleCacheWrite();
+        },
+      });
 
-    const streamHeaders: Record<string, string> = {
-      "Content-Type": "audio/l16;rate=24000;channels=1",
-      "Cache-Control": "no-store",
-      "X-Audio-Stream": "1",
-      "X-Audio-Provider": "gemini-tts",
-      "X-Audio-Cache": "MISS",
-    };
-    if (c.env.UPLOADS) {
-      streamHeaders["Content-Location"] = contentLocation;
+      const streamHeaders: Record<string, string> = {
+        "Content-Type": `audio/l16;rate=${streamState.sampleRate};channels=1`,
+        "Cache-Control": "no-store",
+        "X-Audio-Stream": "1",
+        "X-Audio-Provider": "gemini-tts",
+        "X-Audio-Cache": "MISS",
+      };
+      if (c.env.UPLOADS) {
+        streamHeaders["Content-Location"] = geminiContentLocation;
+      }
+
+      return new Response(pcmStream, { status: 200, headers: streamHeaders });
+    } else {
+      await reader.cancel().catch(() => {});
     }
-
-    return new Response(pcmStream, { status: 200, headers: streamHeaders });
   }
 
-  // 3. Fallback to Google Cloud TTS if Gemini stream failed
+  // 3. Fallback to Google Cloud TTS under its isolated R2 namespace
   if (c.env.GOOGLE_TTS_API_KEY) {
+    if (c.env.UPLOADS) {
+      const cachedFallback = await c.env.UPLOADS.get(googleCacheKey);
+      if (cachedFallback) {
+        return buildCachedAudioResponse(
+          cachedFallback,
+          googleContentLocation,
+          "audio/mpeg",
+          "google-cloud-tts",
+          false,
+        );
+      }
+    }
+
     const gcAudio = await synthesizeWithGoogleCloudTts(c.env, {
       text: data.text,
       languageCode,
@@ -733,8 +1205,8 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
         "X-Audio-Cache": "MISS",
       };
       if (c.env.UPLOADS) {
-        headers["Content-Location"] = contentLocation;
-        const putPromise = c.env.UPLOADS.put(cacheKey, gcAudio.bytes, {
+        headers["Content-Location"] = googleContentLocation;
+        const putPromise = c.env.UPLOADS.put(googleCacheKey, gcAudio.bytes, {
           httpMetadata: {
             contentType: gcAudio.contentType,
             cacheControl: "private, max-age=2592000",
@@ -745,7 +1217,9 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
         });
         try {
           c.executionCtx.waitUntil(putPromise);
-        } catch {}
+        } catch {
+          await putPromise;
+        }
       }
       return new Response(gcAudio.bytes, {
         status: 200,
@@ -761,15 +1235,16 @@ async function handleStreamSpeak(c: import("hono").Context<{ Bindings: Env }>) {
   );
 }
 
+const MAX_GEMINI_PREWARM_ITEMS = 6;
+
 export async function prewarmAudioItems(
   env: Env,
   profile: LearnerProfileDto,
   items: Array<{ text: string; languageCode: string; slow?: boolean }>,
 ): Promise<void> {
-  if (!env.UPLOADS || !env.GOOGLE_TTS_API_KEY || items.length === 0) return;
+  if (!env.UPLOADS || (!env.GEMINI_API_KEY && !env.GOOGLE_TTS_API_KEY) || items.length === 0) return;
 
   const geminiVoice = resolveGeminiVoiceName(profile.ttsVoiceName, env.GEMINI_TTS_VOICE);
-  const model = env.GEMINI_TTS_MODEL || "gemini-3.8-flash-lite-tts";
   const seen = new Set<string>();
   const unique = items
     .map((it) => ({
@@ -783,26 +1258,85 @@ export async function prewarmAudioItems(
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
-    })
-    .slice(0, 12);
+    });
 
-  // Bounded parallel batches of 3 via high-RPM Cloud TTS (never burns Gemini RPM quota)
-  for (let i = 0; i < unique.length; i += 3) {
-    const batch = unique.slice(i, i + 3);
+  if (env.GEMINI_API_KEY) {
+    const targets = unique.slice(0, MAX_GEMINI_PREWARM_ITEMS);
+    let rateLimited = false;
+
+    for (let i = 0; i < targets.length && !rateLimited; i += 2) {
+      const batch = targets.slice(i, i + 2);
+      await Promise.all(
+        batch.map(async (item) => {
+          if (rateLimited) return;
+          try {
+            const { languageCode, spokenLanguageName, dialectRules } = resolveLanguageContext(
+              profile,
+              item.languageCode,
+            );
+            const geminiCacheKey = await buildGeminiCacheKey(
+              env,
+              profile,
+              geminiVoice,
+              languageCode,
+              item.slow,
+              item.text,
+            );
+            const exists = env.UPLOADS?.head
+              ? await env.UPLOADS.head(geminiCacheKey)
+              : await env.UPLOADS!.get(geminiCacheKey);
+            if (exists && exists.customMetadata?.provider !== "google-cloud-tts") {
+              return;
+            }
+
+            const result = await synthesizeWithGeminiTts(env, {
+              text: item.text,
+              languageCode,
+              targetLanguageName: spokenLanguageName,
+              dialectRules,
+              voiceName: geminiVoice,
+              slow: item.slow,
+              prefetch: true,
+            });
+
+            if (result.status === 429 || result.reason === "gemini-tts-429") {
+              rateLimited = true;
+              return;
+            }
+            if (!result.audio) return;
+
+            await env.UPLOADS!.put(geminiCacheKey, result.audio.bytes, {
+              httpMetadata: {
+                contentType: result.audio.contentType,
+                cacheControl: "private, max-age=2592000",
+              },
+              customMetadata: {
+                provider: "gemini-tts",
+              },
+            });
+          } catch {}
+        }),
+      );
+    }
+    return;
+  }
+
+  // Fallback-only environments (no GEMINI_API_KEY): prewarm strictly in the Google Cloud namespace
+  const targets = unique.slice(0, 12);
+  for (let i = 0; i < targets.length; i += 3) {
+    const batch = targets.slice(i, i + 3);
     await Promise.all(
       batch.map(async (item) => {
         try {
-          const cacheKey = await computeAudioCacheKey([
-            model,
-            geminiVoice,
-            profile.ttsVoiceName,
+          const googleCacheKey = await buildGoogleCloudCacheKey(
+            profile,
             item.languageCode,
-            item.slow ? "slow" : "normal",
+            item.slow,
             item.text,
-          ]);
+          );
           const exists = env.UPLOADS?.head
-            ? await env.UPLOADS.head(cacheKey)
-            : await env.UPLOADS!.get(cacheKey);
+            ? await env.UPLOADS.head(googleCacheKey)
+            : await env.UPLOADS!.get(googleCacheKey);
           if (exists) return;
 
           const gc = await synthesizeWithGoogleCloudTts(env, {
@@ -813,7 +1347,7 @@ export async function prewarmAudioItems(
           });
           if (!gc) return;
 
-          await env.UPLOADS!.put(cacheKey, gc.bytes, {
+          await env.UPLOADS!.put(googleCacheKey, gc.bytes, {
             httpMetadata: {
               contentType: gc.contentType,
               cacheControl: "private, max-age=2592000",

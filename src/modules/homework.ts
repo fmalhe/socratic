@@ -3,12 +3,12 @@ import { z } from "zod";
 import {
   arrayBufferToInlineImage,
   callGeminiStructured,
-  fileToInlineImage,
   renderHomeworkHelpSystemPrompt,
   renderHomeworkPingPongSystemPrompt,
   renderHomeworkScanSystemPrompt,
   splitIntoSentences,
 } from "../lib/gemini";
+import { parseFormDataBody, parseJsonBody, parsePositiveIntParam } from "../lib/http";
 import type {
   Env,
   ExerciseStatus,
@@ -184,16 +184,35 @@ const replySchema = z.object({
   message: z.string().trim().min(1),
 });
 
-function derivePageTitle(row: SessionRow): string {
+const D1_BIND_CHUNK_SIZE = 80;
+
+function chunkIds(ids: readonly number[], size = D1_BIND_CHUNK_SIZE): number[][] {
+  if (ids.length === 0) return [];
+  const unique = Array.from(new Set(ids));
+  const chunks: number[][] = [];
+  for (let i = 0; i < unique.length; i += size) {
+    chunks.push(unique.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function defaultPageTitleForProfile(targetLanguageCode?: string): string {
+  return !targetLanguageCode || targetLanguageCode.toLowerCase().startsWith("pt")
+    ? "Página de TPC"
+    : "Homework Page";
+}
+
+function derivePageTitle(row: SessionRow, targetLanguageCode?: string): string {
+  const fallback = defaultPageTitleForProfile(targetLanguageCode);
   if (row.page_title?.trim()) {
     return row.page_title.trim();
   }
   const source = row.page_text_target?.trim() || row.page_summary_native?.trim() || "";
-  if (!source) return "Página de TPC";
+  if (!source) return fallback;
   const firstLine = source.split(/[\n.!?]/)[0]?.trim() || source;
   const words = firstLine.split(/\s+/).filter(Boolean).slice(0, 5);
   const title = words.join(" ");
-  return title.length > 44 ? `${title.slice(0, 41).trim()}...` : title || "Página de TPC";
+  return title.length > 44 ? `${title.slice(0, 41).trim()}...` : title || fallback;
 }
 
 function normalizePassage(
@@ -244,34 +263,43 @@ function parseReadingPassage(row: SessionRow, pageTitle: string): HomeworkReadin
 async function hydrateSessionRows(
   db: D1Database,
   sessionRows: SessionRow[],
+  targetLanguageCode?: string,
 ): Promise<HomeworkSessionResponse[]> {
   if (sessionRows.length === 0) {
     return [];
   }
 
-  const sessionIds = sessionRows.map((s) => s.id);
-  const sessionPlaceholders = sessionIds.map(() => "?").join(", ");
-  const exerciseRes = await db
-    .prepare(
-      `SELECT * FROM homework_exercise WHERE session_id IN (${sessionPlaceholders}) ORDER BY session_id ASC, position ASC`,
-    )
-    .bind(...sessionIds)
-    .all<ExerciseRow>();
-
-  const exerciseRows = exerciseRes.results ?? [];
-  const messagesByExercise = new Map<number, HomeworkMessageDto[]>();
-
-  if (exerciseRows.length > 0) {
-    const exerciseIds = exerciseRows.map((e) => e.id);
-    const exercisePlaceholders = exerciseIds.map(() => "?").join(", ");
-    const msgRes = await db
+  const exerciseRows: ExerciseRow[] = [];
+  for (const chunk of chunkIds(sessionRows.map((s) => s.id))) {
+    const placeholders = chunk.map(() => "?").join(", ");
+    const exerciseRes = await db
       .prepare(
-        `SELECT * FROM homework_message WHERE exercise_id IN (${exercisePlaceholders}) ORDER BY id ASC`,
+        `SELECT * FROM homework_exercise WHERE session_id IN (${placeholders}) ORDER BY session_id ASC, position ASC, id ASC`,
       )
-      .bind(...exerciseIds)
-      .all<MessageRow>();
+      .bind(...chunk)
+      .all<ExerciseRow>();
+    exerciseRows.push(...(exerciseRes.results ?? []));
+  }
+  exerciseRows.sort(
+    (a, b) => a.session_id - b.session_id || a.position - b.position || a.id - b.id,
+  );
 
-    for (const m of msgRes.results ?? []) {
+  const messagesByExercise = new Map<number, HomeworkMessageDto[]>();
+  if (exerciseRows.length > 0) {
+    const messageRows: MessageRow[] = [];
+    for (const chunk of chunkIds(exerciseRows.map((e) => e.id))) {
+      const placeholders = chunk.map(() => "?").join(", ");
+      const msgRes = await db
+        .prepare(
+          `SELECT * FROM homework_message WHERE exercise_id IN (${placeholders}) ORDER BY id ASC`,
+        )
+        .bind(...chunk)
+        .all<MessageRow>();
+      messageRows.push(...(msgRes.results ?? []));
+    }
+    messageRows.sort((a, b) => a.id - b.id);
+
+    for (const m of messageRows) {
       const list = messagesByExercise.get(m.exercise_id) ?? [];
       list.push({
         id: m.id,
@@ -312,7 +340,7 @@ async function hydrateSessionRows(
   }
 
   return sessionRows.map((row) => {
-    const pageTitle = derivePageTitle(row);
+    const pageTitle = derivePageTitle(row, targetLanguageCode);
     return {
       id: row.id,
       profileId: row.profile_id,
@@ -331,6 +359,7 @@ export async function getHomeworkSession(
   db: D1Database,
   profileId: number,
   sessionId: number,
+  options?: { targetLanguageCode?: string },
 ): Promise<HomeworkSessionResponse | null> {
   const row = await db
     .prepare("SELECT * FROM homework_session WHERE id = ? AND profile_id = ?")
@@ -339,14 +368,14 @@ export async function getHomeworkSession(
   if (!row) {
     return null;
   }
-  const [hydrated] = await hydrateSessionRows(db, [row]);
+  const [hydrated] = await hydrateSessionRows(db, [row], options?.targetLanguageCode);
   return hydrated ?? null;
 }
 
 export async function listHomeworkSessions(
   db: D1Database,
   profileId: number,
-  options?: { limit?: number },
+  options?: { limit?: number; targetLanguageCode?: string },
 ): Promise<HomeworkSessionResponse[]> {
   const limit = Math.max(1, Math.min(50, options?.limit ?? 20));
   const res = await db
@@ -354,29 +383,32 @@ export async function listHomeworkSessions(
     .bind(profileId, limit)
     .all<SessionRow>();
 
-  return hydrateSessionRows(db, res.results ?? []);
+  return hydrateSessionRows(db, res.results ?? [], options?.targetLanguageCode);
 }
 
 export const homeworkRoutes = new Hono<{ Bindings: Env }>();
 
 homeworkRoutes.post("/help", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const form = await c.req.formData();
+  const form = await parseFormDataBody(c);
   const imageField = form.get("image");
   const questionField = form.get("question");
 
-  const image = imageField instanceof File && imageField.size > 0 ? imageField : undefined;
+  const hasImageFile = imageField instanceof File && imageField.size > 0;
   const question = typeof questionField === "string" && questionField.trim() ? questionField.trim() : undefined;
 
-  if (!image && !question) {
+  if (!hasImageFile && !question) {
     return c.json({ error: "Either an image or a question must be provided" }, 400);
   }
 
+  const validatedImage = hasImageFile ? await validateImageUpload(imageField) : null;
   const profile = await getActiveProfile(c.env.DB, profileId);
   const response = await callGeminiStructured<HomeworkHelpResponse>(c.env, {
     systemPrompt: renderHomeworkHelpSystemPrompt(profile),
     userText: question ?? "Please explain this homework exercise without giving away the answer.",
-    image: image ? await fileToInlineImage(image) : undefined,
+    image: validatedImage
+      ? arrayBufferToInlineImage(validatedImage.buffer, validatedImage.mimeType)
+      : undefined,
     responseSchema: HOMEWORK_HELP_SCHEMA,
   });
 
@@ -385,14 +417,11 @@ homeworkRoutes.post("/help", async (c) => {
 
 homeworkRoutes.post("/sessions/scan", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const form = await c.req.formData();
-  const image = form.get("image");
-  validateImageUpload(image);
+  const form = await parseFormDataBody(c);
+  const { file: image, buffer, mimeType } = await validateImageUpload(form.get("image"));
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const buffer = await image.arrayBuffer();
-  const inlineImage = arrayBufferToInlineImage(buffer, image.type || "image/jpeg");
-  const stored = await storeUploadedImage(c.env, image, "homework", buffer);
+  const inlineImage = arrayBufferToInlineImage(buffer, mimeType);
 
   const scanned = await callGeminiStructured<ScannedHomeworkPage>(c.env, {
     systemPrompt: renderHomeworkScanSystemPrompt(profile),
@@ -401,54 +430,65 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
     responseSchema: HOMEWORK_SCAN_SCHEMA,
   });
 
-  const pageTitle = scanned.pageTitle?.trim() || "Página de TPC";
+  const stored = await storeUploadedImage(c.env, image, "homework", buffer, mimeType);
+  const pageTitle = scanned.pageTitle?.trim() || defaultPageTitleForProfile(profile.targetLanguageCode);
   const passageToStore: HomeworkReadingPassageDto = {
     titleTarget: scanned.readingPassage?.titleTarget?.trim() || pageTitle,
     sentences: Array.isArray(scanned.readingPassage?.sentences) ? scanned.readingPassage.sentences : [],
   };
 
-  const insertSession = await c.env.DB.prepare(
-    `INSERT INTO homework_session
-       (profile_id, page_title, page_summary_native, page_text_target, reading_passage_json, image_key)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      profile.id,
-      pageTitle,
-      scanned.pageSummaryNative,
-      scanned.pageTextTarget,
-      JSON.stringify(passageToStore),
-      stored.imageKey,
+  let session: HomeworkSessionResponse | null = null;
+  try {
+    const insertSession = await c.env.DB.prepare(
+      `INSERT INTO homework_session
+         (profile_id, page_title, page_summary_native, page_text_target, reading_passage_json, image_key)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run();
+      .bind(
+        profile.id,
+        pageTitle,
+        scanned.pageSummaryNative,
+        scanned.pageTextTarget,
+        JSON.stringify(passageToStore),
+        stored.imageKey,
+      )
+      .run();
 
-  const sessionId = Number(insertSession.meta.last_row_id);
-  const exerciseStatements = (scanned.exercises ?? []).map((ex, idx) =>
-    c.env.DB.prepare(
-      `INSERT INTO homework_exercise
-         (session_id, position, label, prompt_target, prompt_native, prompt_english, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
-    ).bind(
-      sessionId,
-      idx + 1,
-      ex.label,
-      ex.promptTarget,
-      ex.promptNative ?? null,
-      ex.promptEnglish ?? null,
-      ex.explanationNative,
-      ex.explanationTarget ?? null,
-      ex.explanationEnglish ?? null,
-      JSON.stringify(ex.trickyWords ?? []),
-      ex.openingQuestionNative,
-    ),
-  );
+    const sessionId = Number(insertSession.meta.last_row_id);
+    const exerciseStatements = (scanned.exercises ?? []).map((ex, idx) =>
+      c.env.DB.prepare(
+        `INSERT INTO homework_exercise
+           (session_id, position, label, prompt_target, prompt_native, prompt_english, explanation_native, explanation_target, explanation_english, tricky_words_json, opening_question_native, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`,
+      ).bind(
+        sessionId,
+        idx + 1,
+        ex.label,
+        ex.promptTarget,
+        ex.promptNative ?? null,
+        ex.promptEnglish ?? null,
+        ex.explanationNative,
+        ex.explanationTarget ?? null,
+        ex.explanationEnglish ?? null,
+        JSON.stringify(ex.trickyWords ?? []),
+        ex.openingQuestionNative,
+      ),
+    );
 
-  if (exerciseStatements.length > 0) {
-    await c.env.DB.batch(exerciseStatements);
+    if (exerciseStatements.length > 0) {
+      await c.env.DB.batch(exerciseStatements);
+    }
+
+    session = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+      targetLanguageCode: profile.targetLanguageCode,
+    });
+  } catch (err) {
+    await deleteUploadedImage(c.env, stored.imageKey);
+    throw err;
   }
 
   const warmItems: Array<{ text: string; languageCode: string; slow?: boolean }> = [];
-  for (const s of passageToStore.sentences.slice(0, 4)) {
+  for (const s of passageToStore.sentences.slice(0, 2)) {
     warmItems.push({ text: s.targetText, languageCode: profile.targetLanguageCode, slow: false });
     if (s.nativeSummary) {
       warmItems.push({ text: s.nativeSummary, languageCode: profile.nativeLanguageCode, slow: false });
@@ -470,7 +510,6 @@ homeworkRoutes.post("/sessions/scan", async (c) => {
     } catch {}
   }
 
-  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
   return c.json(session);
 });
 
@@ -517,7 +556,10 @@ homeworkRoutes.get("/sessions", async (c) => {
   const limitRaw = Number(c.req.query("limit") ?? "20");
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.trunc(limitRaw))) : 20;
 
-  const sessions = await listHomeworkSessions(c.env.DB, profile.id, { limit: q ? 50 : limit });
+  const sessions = await listHomeworkSessions(c.env.DB, profile.id, {
+    limit: q ? 50 : limit,
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const result = q
     ? sessions.filter((s) => matchesHomeworkQuery(s, q)).slice(0, limit)
     : sessions.slice(0, limit);
@@ -559,7 +601,10 @@ homeworkRoutes.on("QUERY", "/sessions", async (c) => {
 
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const allSessions = await listHomeworkSessions(c.env.DB, profile.id, { limit: 50 });
+  const allSessions = await listHomeworkSessions(c.env.DB, profile.id, {
+    limit: 50,
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const needle = queryInput.q.toLowerCase();
   const filtered = allSessions
     .filter((session) => matchesHomeworkQuery(session, needle, queryInput.status))
@@ -572,12 +617,11 @@ homeworkRoutes.on("QUERY", "/sessions", async (c) => {
 
 homeworkRoutes.get("/sessions/:sessionId", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const sessionId = Number(c.req.param("sessionId"));
-  if (!Number.isInteger(sessionId) || sessionId <= 0) {
-    return c.json({ error: "Invalid sessionId" }, 400);
-  }
+  const sessionId = parsePositiveIntParam(c.req.param("sessionId"), "sessionId");
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   if (!session) {
     return c.json({ error: `Homework session not found: ${sessionId}` }, 404);
   }
@@ -586,10 +630,7 @@ homeworkRoutes.get("/sessions/:sessionId", async (c) => {
 
 homeworkRoutes.delete("/sessions/:sessionId", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const sessionId = Number(c.req.param("sessionId"));
-  if (!Number.isInteger(sessionId) || sessionId <= 0) {
-    return c.json({ error: "Invalid sessionId" }, 400);
-  }
+  const sessionId = parsePositiveIntParam(c.req.param("sessionId"), "sessionId");
 
   const profile = await getActiveProfile(c.env.DB, profileId);
   const row = await c.env.DB.prepare(
@@ -619,15 +660,18 @@ homeworkRoutes.delete("/sessions/:sessionId", async (c) => {
 
 homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/reply", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const sessionId = Number(c.req.param("sessionId"));
-  const exerciseId = Number(c.req.param("exerciseId"));
-  const parsed = replySchema.safeParse(await c.req.json());
+  const sessionId = parsePositiveIntParam(c.req.param("sessionId"), "sessionId");
+  const exerciseId = parsePositiveIntParam(c.req.param("exerciseId"), "exerciseId");
+  const rawBody = await parseJsonBody(c);
+  const parsed = replySchema.safeParse(rawBody);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten() }, 400);
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const exercise = session?.exercises.find((e) => e.id === exerciseId);
   if (!session || !exercise) {
     return c.json({ error: `Homework exercise not found: ${exerciseId}` }, 404);
@@ -667,11 +711,13 @@ homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/reply", async (c
 
 homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/complete", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const sessionId = Number(c.req.param("sessionId"));
-  const exerciseId = Number(c.req.param("exerciseId"));
+  const sessionId = parsePositiveIntParam(c.req.param("sessionId"), "sessionId");
+  const exerciseId = parsePositiveIntParam(c.req.param("exerciseId"), "exerciseId");
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const exercise = session?.exercises.find((e) => e.id === exerciseId);
   if (!session || !exercise) {
     return c.json({ error: `Homework exercise not found: ${exerciseId}` }, 404);
@@ -681,7 +727,9 @@ homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/complete", async
     .bind(exerciseId)
     .run();
 
-  const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const updatedExercise = updatedSession?.exercises.find((e) => e.id === exerciseId);
   return c.json(updatedExercise);
 });
@@ -699,11 +747,13 @@ const HYDRATE_SCHEMA = {
 
 homeworkRoutes.post("/sessions/:sessionId/exercises/:exerciseId/hydrate", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const sessionId = Number(c.req.param("sessionId"));
-  const exerciseId = Number(c.req.param("exerciseId"));
+  const sessionId = parsePositiveIntParam(c.req.param("sessionId"), "sessionId");
+  const exerciseId = parsePositiveIntParam(c.req.param("exerciseId"), "exerciseId");
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const exercise = session?.exercises.find((e) => e.id === exerciseId);
   if (!session || !exercise) {
     return c.json({ error: `Homework exercise not found: ${exerciseId}` }, 404);
@@ -737,10 +787,10 @@ Return concise, kid-friendly spoken-only plain prose (<= 25 words each, no markd
 
   await c.env.DB.prepare(
     `UPDATE homework_exercise
-       SET prompt_native = COALESCE(prompt_native, ?),
-           prompt_english = COALESCE(prompt_english, ?),
-           explanation_target = COALESCE(explanation_target, ?),
-           explanation_english = COALESCE(explanation_english, ?)
+       SET prompt_native = COALESCE(NULLIF(TRIM(prompt_native), ''), ?),
+           prompt_english = COALESCE(NULLIF(TRIM(prompt_english), ''), ?),
+           explanation_target = COALESCE(NULLIF(TRIM(explanation_target), ''), ?),
+           explanation_english = COALESCE(NULLIF(TRIM(explanation_english), ''), ?)
      WHERE id = ?`,
   )
     .bind(
@@ -752,7 +802,9 @@ Return concise, kid-friendly spoken-only plain prose (<= 25 words each, no markd
     )
     .run();
 
-  const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const updatedSession = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   const updatedExercise = updatedSession?.exercises.find((e) => e.id === exerciseId);
   return c.json(updatedExercise);
 });
@@ -779,13 +831,12 @@ const PASSAGE_HYDRATE_SCHEMA = {
 
 homeworkRoutes.post("/sessions/:sessionId/passage/hydrate", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const sessionId = Number(c.req.param("sessionId"));
-  if (!Number.isInteger(sessionId) || sessionId <= 0) {
-    return c.json({ error: "Invalid sessionId" }, 400);
-  }
+  const sessionId = parsePositiveIntParam(c.req.param("sessionId"), "sessionId");
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId);
+  const session = await getHomeworkSession(c.env.DB, profile.id, sessionId, {
+    targetLanguageCode: profile.targetLanguageCode,
+  });
   if (!session) {
     return c.json({ error: `Homework session not found: ${sessionId}` }, 404);
   }

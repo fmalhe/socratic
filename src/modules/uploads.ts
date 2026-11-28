@@ -5,23 +5,102 @@ const ALLOWED_FOLDERS = new Set(["reading", "homework", "audio"]);
 const SAFE_FILENAME = /^[a-zA-Z0-9._-]+$/;
 export const MAX_IMAGE_UPLOAD_BYTES = 12 * 1024 * 1024;
 
+export const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+] as const);
+
+export type AllowedImageMime =
+  | "image/jpeg"
+  | "image/png"
+  | "image/webp"
+  | "image/heic"
+  | "image/heif";
+
 function extensionForMime(mimeType: string): string {
   const lower = mimeType.toLowerCase();
   if (lower.includes("png")) return "png";
   if (lower.includes("webp")) return "webp";
+  if (lower.includes("heic")) return "heic";
+  if (lower.includes("heif")) return "heif";
   return "jpg";
 }
 
-export function validateImageUpload(file: unknown): asserts file is File {
+export function detectImageMimeFromBytes(buffer: ArrayBuffer): AllowedImageMime | null {
+  const bytes = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 32));
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && // R
+    bytes[1] === 0x49 && // I
+    bytes[2] === 0x46 && // F
+    bytes[3] === 0x46 && // F
+    bytes[8] === 0x57 && // W
+    bytes[9] === 0x45 && // E
+    bytes[10] === 0x42 && // B
+    bytes[11] === 0x50 // P
+  ) {
+    return "image/webp";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[4] === 0x66 && // f
+    bytes[5] === 0x74 && // t
+    bytes[6] === 0x79 && // y
+    bytes[7] === 0x70 // p
+  ) {
+    const brand = String.fromCharCode(bytes[8]!, bytes[9]!, bytes[10]!, bytes[11]!).toLowerCase();
+    if (brand === "heic" || brand === "heix" || brand === "hevc" || brand === "hevx") {
+      return "image/heic";
+    }
+    if (brand === "mif1" || brand === "msf1" || brand === "heif") {
+      return "image/heif";
+    }
+  }
+  return null;
+}
+
+export async function validateImageUpload(
+  file: unknown,
+): Promise<{ file: File; buffer: ArrayBuffer; mimeType: AllowedImageMime }> {
   if (!(file instanceof File) || file.size === 0) {
     throw new Error("Invalid image: file must not be empty");
   }
   if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
     throw new Error("Invalid image: maximum size is 12 MB");
   }
-  if (file.type && !file.type.toLowerCase().startsWith("image/")) {
+  const declared = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (
+    declared &&
+    declared !== "application/octet-stream" &&
+    !ALLOWED_IMAGE_MIME_TYPES.has(declared as AllowedImageMime)
+  ) {
     throw new Error("Invalid image: unsupported file type");
   }
+  const buffer = await file.arrayBuffer();
+  const detected = detectImageMimeFromBytes(buffer);
+  if (!detected) {
+    throw new Error("Invalid image: unsupported file type");
+  }
+  return { file, buffer, mimeType: detected };
 }
 
 export function buildUploadUrl(imageKey: string | null | undefined): string | null {
@@ -33,12 +112,13 @@ export async function storeUploadedImage(
   file: File,
   folder: "reading" | "homework",
   preloadedBuffer?: ArrayBuffer,
+  resolvedMimeType?: string,
 ): Promise<{ imageKey: string | null; imageUrl: string | null }> {
   if (!env.UPLOADS) {
     return { imageKey: null, imageUrl: null };
   }
   try {
-    const contentType = file.type || "image/jpeg";
+    const contentType = resolvedMimeType || file.type || "image/jpeg";
     const ext = extensionForMime(contentType);
     const imageKey = `${folder}/${crypto.randomUUID()}.${ext}`;
     const bytes = preloadedBuffer ?? (await file.arrayBuffer());
@@ -85,6 +165,15 @@ function buildAssetHeaders(obj: R2Object, folder: string): Headers {
   }
   headers.set("ETag", obj.httpEtag);
   headers.set("Accept-Ranges", "bytes");
+  headers.set("X-Content-Type-Options", "nosniff");
+
+  const resolvedType = (headers.get("Content-Type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (folder !== "audio" || !resolvedType.startsWith("audio/")) {
+    headers.set("Content-Security-Policy", "default-src 'none'; sandbox");
+    if (folder !== "audio" && !ALLOWED_IMAGE_MIME_TYPES.has(resolvedType as AllowedImageMime)) {
+      headers.set("Content-Type", "application/octet-stream");
+    }
+  }
   return headers;
 }
 
@@ -94,7 +183,13 @@ uploadRoutes.get("/:folder/:filename", async (c) => {
   }
   const folder = c.req.param("folder");
   const filename = c.req.param("filename");
-  if (!ALLOWED_FOLDERS.has(folder) || !SAFE_FILENAME.test(filename)) {
+  if (
+    !ALLOWED_FOLDERS.has(folder) ||
+    !SAFE_FILENAME.test(filename) ||
+    filename === "." ||
+    filename === ".." ||
+    filename.includes("..")
+  ) {
     return c.json({ error: "Invalid image key" }, 400);
   }
 
@@ -128,16 +223,19 @@ uploadRoutes.get("/:folder/:filename", async (c) => {
   if (startRaw && endRaw) {
     parsedStart = Number(startRaw);
     parsedEnd = Number(endRaw);
-    if (parsedStart > parsedEnd) {
+    if (!Number.isSafeInteger(parsedStart) || !Number.isSafeInteger(parsedEnd) || parsedStart > parsedEnd) {
       return new Response("Range Not Satisfiable", { status: 416 });
     }
     rangeOption = { offset: parsedStart, length: parsedEnd - parsedStart + 1 };
   } else if (startRaw) {
     parsedStart = Number(startRaw);
+    if (!Number.isSafeInteger(parsedStart)) {
+      return new Response("Range Not Satisfiable", { status: 416 });
+    }
     rangeOption = { offset: parsedStart };
   } else {
     suffixLength = Number(endRaw);
-    if (suffixLength <= 0) {
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
       return new Response("Range Not Satisfiable", { status: 416 });
     }
     rangeOption = { suffix: suffixLength };

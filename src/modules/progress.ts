@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { computeNextStreak } from "../lib/streak";
+import { parseJsonBody } from "../lib/http";
 import type { Env, ProgressResponse, SavedWordDto } from "../types";
 import { getActiveProfile, resolveProfileId } from "./profile";
 
@@ -69,29 +69,43 @@ progressRoutes.get("/", async (c) => {
 
 progressRoutes.post("/complete", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const parsed = completeSchema.safeParse(await c.req.json());
+  const rawBody = await parseJsonBody(c);
+  const parsed = completeSchema.safeParse(rawBody);
   if (!parsed.success) {
     return c.json({ error: parsed.error.flatten() }, 400);
   }
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const current = await getProgress(c.env.DB, profile.id);
   const todayIso = new Date().toISOString().slice(0, 10);
 
-  const nextStreak = computeNextStreak(current.currentStreakDays, current.lastActivityDate, todayIso);
-  const nextStars = current.totalStars + parsed.data.starsEarned;
-  const nextPages = current.pagesReadCount + (parsed.data.activityType === "READING" ? 1 : 0);
+  const starsDelta = parsed.data.starsEarned;
+  const pagesDelta = parsed.data.activityType === "READING" ? 1 : 0;
 
   const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(
       `INSERT INTO child_progress (profile_id, total_stars, current_streak_days, last_activity_date, pages_read_count)
-       VALUES (?, ?, ?, ?, ?)
+       VALUES (?, ?, 1, ?, ?)
        ON CONFLICT(profile_id) DO UPDATE SET
-         total_stars = excluded.total_stars,
-         current_streak_days = excluded.current_streak_days,
-         last_activity_date = excluded.last_activity_date,
-         pages_read_count = excluded.pages_read_count`,
-    ).bind(profile.id, nextStars, nextStreak, todayIso, nextPages),
+         total_stars = child_progress.total_stars + ?,
+         current_streak_days = CASE
+           WHEN child_progress.last_activity_date IS NULL THEN 1
+           WHEN child_progress.last_activity_date = ? THEN MAX(1, child_progress.current_streak_days)
+           WHEN child_progress.last_activity_date = date(?, '-1 day') THEN child_progress.current_streak_days + 1
+           ELSE 1
+         END,
+         last_activity_date = ?,
+         pages_read_count = child_progress.pages_read_count + ?`,
+    ).bind(
+      profile.id,
+      starsDelta,
+      todayIso,
+      pagesDelta,
+      starsDelta,
+      todayIso,
+      todayIso,
+      todayIso,
+      pagesDelta,
+    ),
   ];
 
   const existingRows = await c.env.DB.prepare(

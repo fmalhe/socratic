@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { arrayBufferToInlineImage, callGeminiStructured, renderReadingSystemPrompt } from "../lib/gemini";
+import { parseFormDataBody } from "../lib/http";
 import type { Env, ReadingPageResponse } from "../types";
 import { prewarmAudioItems } from "./audio";
 import { getActiveProfile, resolveProfileId } from "./profile";
@@ -41,14 +42,11 @@ export const readingRoutes = new Hono<{ Bindings: Env }>();
 
 readingRoutes.post("/scan", async (c) => {
   const profileId = resolveProfileId(c.req.header("X-Profile-Id"));
-  const form = await c.req.formData();
-  const image = form.get("image");
-  validateImageUpload(image);
+  const form = await parseFormDataBody(c);
+  const { file: image, buffer, mimeType } = await validateImageUpload(form.get("image"));
 
   const profile = await getActiveProfile(c.env.DB, profileId);
-  const buffer = await image.arrayBuffer();
-  const inlineImage = arrayBufferToInlineImage(buffer, image.type || "image/jpeg");
-  const stored = await storeUploadedImage(c.env, image, "reading", buffer);
+  const inlineImage = arrayBufferToInlineImage(buffer, mimeType);
 
   const response = await callGeminiStructured<ReadingPageResponse>(c.env, {
     systemPrompt: renderReadingSystemPrompt(profile),
@@ -56,6 +54,8 @@ readingRoutes.post("/scan", async (c) => {
     image: inlineImage,
     responseSchema: READING_SCHEMA,
   });
+
+  const stored = await storeUploadedImage(c.env, image, "reading", buffer, mimeType);
 
   const warmItems = (response.sentences ?? []).slice(0, 6).flatMap((s) => [
     { text: s.targetText, languageCode: profile.targetLanguageCode, slow: false },

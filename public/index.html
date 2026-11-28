@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Socratic — Leitura e TPC</title>
-  <meta name="theme-color" content="#FAF7F2" />
+  <meta name="theme-color" content="#FAF7F0" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=Nunito:wght@600;700;800;900&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
     rel="stylesheet"
   />
   <script>
@@ -23,7 +23,7 @@
         var theme = saved === "dark" ? "dark" : "light";
         document.documentElement.setAttribute("data-theme", theme);
         var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute("content", theme === "dark" ? "#131620" : "#FAF7F2");
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#12151C" : "#FAF7F0");
       } catch (_) {}
     })();
   </script>
@@ -45,7 +45,7 @@
           aria-selected="true"
           type="button"
         >
-          <span aria-hidden="true">✏️</span>
+          <span class="ui-icon" data-icon="pencil" aria-hidden="true"></span>
           <span>TPC</span>
         </button>
         <button
@@ -55,24 +55,21 @@
           aria-selected="false"
           type="button"
         >
-          <span aria-hidden="true">📖</span>
+          <span class="ui-icon" data-icon="bookOpen" aria-hidden="true"></span>
           <span>Ler</span>
         </button>
       </nav>
 
       <div class="header-actions">
         <button id="stars-pill" class="stars-pill" type="button" title="As tuas estrelas e palavras" aria-label="Abrir estrelas e palavras guardadas">
-          <span aria-hidden="true">⭐</span>
+          <span class="ui-icon ui-icon-star" data-icon="star" aria-hidden="true"></span>
           <span id="header-stars-count">0</span>
         </button>
         <button id="theme-toggle" class="icon-btn" type="button" title="Mudar tema claro ou escuro" aria-label="Mudar tema">
-          <span id="theme-toggle-icon" aria-hidden="true">🌙</span>
+          <span id="theme-toggle-icon" class="ui-icon" data-icon="moon" aria-hidden="true"></span>
         </button>
         <button id="settings-btn" class="icon-btn" type="button" title="Definições para Adultos" aria-label="Definições para Adultos">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg>
+          <span class="ui-icon" data-icon="settings" aria-hidden="true"></span>
         </button>
       </div>
     </div>
@@ -81,11 +78,16 @@
   <main class="main-shell">
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
+    <div id="boot-error-banner" class="boot-error-banner" role="alert" hidden>
+      <span class="boot-error-text">Não foi possível ligar ao servidor. Verifica a internet.</span>
+      <button id="boot-retry-btn" class="btn btn-primary btn-sm" type="button">Tentar outra vez</button>
+    </div>
+
     <!-- ===================================================== -->
     <!-- VISTA 1: TPC                                          -->
     <!-- ===================================================== -->
     <section id="view-homework" class="view-section">
-      <div id="hw-empty-state" class="card empty-hero">
+      <div id="hw-empty-state" class="card empty-hero" hidden>
         <div class="owl-stage" data-owl-state="idle">
           <div id="hw-hero-owl" class="owl-svg-slot"></div>
         </div>
@@ -95,11 +97,11 @@
         <input id="hw-file-input" class="visually-hidden" type="file" accept="image/*" />
         <div class="hero-cta-row">
           <button id="hw-camera-btn" class="btn btn-primary btn-xl" type="button">
-            <span aria-hidden="true">📷</span>
+            <span class="ui-icon" data-icon="camera" aria-hidden="true"></span>
             <span>Tirar Foto ou Escolher Página</span>
           </button>
           <button id="hw-open-pages-empty" class="btn btn-secondary btn-lg" type="button" hidden>
-            <span aria-hidden="true">📚</span>
+            <span class="ui-icon" data-icon="layers" aria-hidden="true"></span>
             <span>Páginas Recentes</span>
           </button>
         </div>
@@ -113,8 +115,8 @@
         <div class="scan-status-col">
           <div class="owl-mini-slot" data-owl-state="loading"></div>
           <p id="hw-progress-msg" class="scan-msg">O Owly está a olhar para a tua página&hellip;</p>
-          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-            <div id="hw-progress-fill" class="progress-fill" style="width: 18%"></div>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
+            <div id="hw-progress-fill" class="progress-fill" style="width: 8%"></div>
           </div>
           <button id="hw-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancelar</button>
         </div>
@@ -139,15 +141,15 @@
           <h2 id="hw-page-title" class="page-title">Página de TPC</h2>
           <div class="workspace-actions">
             <button id="hw-photo-btn" class="pill-btn" type="button" title="Ver foto digitalizada">
-              <span aria-hidden="true">📷</span>
+              <span class="ui-icon" data-icon="camera" aria-hidden="true"></span>
               <span>Foto</span>
             </button>
             <button id="hw-pages-btn" class="pill-btn" type="button" title="Abrir páginas guardadas">
-              <span aria-hidden="true">📚</span>
+              <span class="ui-icon" data-icon="layers" aria-hidden="true"></span>
               <span>Páginas</span>
             </button>
             <button id="hw-new-btn" class="pill-btn pill-accent" type="button">
-              <span aria-hidden="true">✨</span>
+              <span class="ui-icon" data-icon="pagePlus" aria-hidden="true"></span>
               <span>Nova</span>
             </button>
           </div>
@@ -158,10 +160,27 @@
         <!-- Texto de Leitura do TPC -->
         <div id="hw-passage-stage" class="card passage-card" hidden>
           <div class="passage-header">
-            <span class="passage-badge">📖 Texto</span>
-            <h3 id="hw-passage-title" class="passage-title"></h3>
+            <div class="passage-title-group">
+              <span class="passage-badge">
+                <span class="ui-icon" data-icon="bookOpen" aria-hidden="true"></span>
+                <span>Texto</span>
+              </span>
+              <h3 id="hw-passage-title" class="passage-title"></h3>
+            </div>
+            <button id="hw-passage-listen-all" class="btn btn-primary btn-sm passage-listen-btn" type="button">
+              <span class="ui-icon" data-icon="play" aria-hidden="true"></span>
+              <span>Ouvir Tudo</span>
+              <span class="btn-spinner" hidden></span>
+              <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+            </button>
           </div>
           <div id="hw-passage-sentences" class="karaoke-sentence-list"></div>
+          <div class="passage-footer">
+            <button id="hw-passage-next-questions" class="btn btn-primary btn-lg passage-next-btn" type="button" hidden>
+              <span>Fazer Perguntas</span>
+              <span class="ui-icon" data-icon="arrowRight" aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
 
         <!-- Exercício Individual -->
@@ -169,7 +188,10 @@
           <div class="card question-hero-card">
             <div class="question-top-row">
               <span id="hw-question-badge" class="question-badge">Pergunta 1</span>
-              <span id="hw-question-done-badge" class="done-badge" hidden>✓ Feito!</span>
+              <span id="hw-question-done-badge" class="done-badge" hidden>
+                <span class="ui-icon" data-icon="check" aria-hidden="true"></span>
+                <span>Feito!</span>
+              </span>
             </div>
 
             <div id="hw-question-karaoke" class="karaoke-prompt" dir="auto"></div>
@@ -177,7 +199,7 @@
             <div class="question-audio-bar">
               <button id="hw-q-listen-pt" class="listen-hero-btn" type="button">
                 <span class="flag-slot" data-flag="pt"></span>
-                <span id="hw-q-listen-pt-label">Ouvir</span>
+                <span>Ouvir</span>
                 <span class="btn-spinner" hidden></span>
                 <span class="eq-bars" hidden><i></i><i></i><i></i></span>
               </button>
@@ -189,23 +211,21 @@
                 aria-pressed="false"
                 title="Ler mais devagar"
               >
-                <span aria-hidden="true">🐢</span>
+                <span class="ui-icon" data-icon="snail" aria-hidden="true"></span>
                 <span>Devagar</span>
               </button>
 
-              <div class="question-flag-pair">
-                <button
-                  id="hw-q-listen-no"
-                  class="flag-icon-btn"
-                  type="button"
-                  title="Ouvir pergunta em Norueguês"
-                  aria-label="Ouvir pergunta em Norueguês"
-                >
-                  <span class="flag-slot" data-flag="no"></span>
-                  <span class="btn-spinner" hidden></span>
-                  <span class="eq-bars" hidden><i></i><i></i><i></i></span>
-                </button>
-              </div>
+              <button
+                id="hw-q-listen-no"
+                class="flag-icon-btn question-flag-no"
+                type="button"
+                title="Ouvir pergunta em Norueguês"
+                aria-label="Ouvir pergunta em Norueguês"
+              >
+                <span class="flag-slot" data-flag="no"></span>
+                <span class="btn-spinner" hidden></span>
+                <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+              </button>
             </div>
 
             <div id="hw-tricky-words" class="tricky-words-row" hidden></div>
@@ -215,9 +235,7 @@
           <div id="hw-owl-dock" class="card owl-helper-dock">
             <div class="owl-dock-top">
               <div id="hw-owl-svg" class="owl-dock-avatar" data-owl-state="idle"></div>
-              <div class="owl-dock-copy">
-                <span class="owl-dock-title">Toca numa bandeira para ouvir o Owly explicar!</span>
-              </div>
+              <span class="owl-dock-title">Toca numa bandeira para ouvir o Owly explicar!</span>
             </div>
 
             <div class="flag-dock-grid">
@@ -237,12 +255,12 @@
           </div>
 
           <div class="kid-action-row">
-            <button id="hw-chat-toggle" class="btn btn-secondary" type="button" aria-expanded="false">
-              <span aria-hidden="true">💬</span>
+            <button id="hw-chat-toggle" class="btn btn-quiet" type="button" aria-expanded="false">
+              <span class="ui-icon" data-icon="chat" aria-hidden="true"></span>
               <span>Perguntar ao Owly</span>
             </button>
             <button id="hw-complete-btn" class="btn btn-celebrate" type="button">
-              <span aria-hidden="true">⭐</span>
+              <span class="ui-icon ui-icon-star" data-icon="star" aria-hidden="true"></span>
               <span>Já acabei!</span>
             </button>
           </div>
@@ -250,20 +268,36 @@
           <div id="hw-chat-drawer" class="card chat-drawer" hidden>
             <div id="hw-chat-messages" class="chat-messages"></div>
             <div class="chat-quick-chips">
-              <button class="quick-chip" type="button" data-msg="Jeg trenger et lite hint">Jeg trenger et hint</button>
-              <button class="quick-chip" type="button" data-msg="Hva betyr dette?">Hva betyr dette?</button>
+              <button class="quick-chip" type="button" data-msg="Preciso de uma dica">
+                <span class="flag-slot flag-slot-xs" data-flag="no"></span>
+                <span>Preciso de uma dica</span>
+              </button>
+              <button class="quick-chip" type="button" data-msg="O que quer dizer isto?">
+                <span class="flag-slot flag-slot-xs" data-flag="no"></span>
+                <span>O que quer dizer isto?</span>
+              </button>
             </div>
             <form id="hw-chat-form" class="chat-form">
               <input
                 id="hw-chat-input"
                 class="chat-input"
                 type="text"
-                placeholder="Escreve ao Owly&hellip;"
+                placeholder="Escreve ao Owly (PT ou NO)&hellip;"
                 autocomplete="off"
               />
               <button id="hw-chat-send" class="btn btn-primary" type="submit">Enviar</button>
             </form>
           </div>
+        </div>
+
+        <div id="hw-empty-session-card" class="card empty-session-card" hidden>
+          <div class="owl-mini-slot" data-owl-state="idle"></div>
+          <h3 class="error-title">Não encontrei texto nem perguntas nesta foto.</h3>
+          <p class="error-subtitle">Tenta aproximar a câmara e garantir boa luz na página.</p>
+          <button id="hw-empty-session-retry" class="btn btn-primary" type="button">
+            <span class="ui-icon" data-icon="camera" aria-hidden="true"></span>
+            <span>Tirar Nova Foto</span>
+          </button>
         </div>
       </div>
     </section>
@@ -281,7 +315,7 @@
 
         <input id="read-file-input" class="visually-hidden" type="file" accept="image/*" />
         <button id="read-camera-btn" class="btn btn-primary btn-xl" type="button">
-          <span aria-hidden="true">📖</span>
+          <span class="ui-icon" data-icon="camera" aria-hidden="true"></span>
           <span>Fotografar Página do Livro</span>
         </button>
       </div>
@@ -294,8 +328,8 @@
         <div class="scan-status-col">
           <div class="owl-mini-slot" data-owl-state="loading"></div>
           <p id="read-progress-msg" class="scan-msg">O Owly está a ler a tua página&hellip;</p>
-          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-            <div id="read-progress-fill" class="progress-fill" style="width: 18%"></div>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8">
+            <div id="read-progress-fill" class="progress-fill" style="width: 8%"></div>
           </div>
           <button id="read-scan-cancel" class="btn btn-ghost btn-sm" type="button">Cancelar</button>
         </div>
@@ -319,16 +353,22 @@
         <div class="workspace-bar">
           <h2 class="page-title">Página do Livro</h2>
           <div class="workspace-actions">
+            <button id="read-listen-all" class="pill-btn pill-accent" type="button">
+              <span class="ui-icon" data-icon="play" aria-hidden="true"></span>
+              <span>Ouvir Tudo</span>
+              <span class="btn-spinner" hidden></span>
+              <span class="eq-bars" hidden><i></i><i></i><i></i></span>
+            </button>
             <button id="read-photo-btn" class="pill-btn" type="button">
-              <span aria-hidden="true">📷</span>
+              <span class="ui-icon" data-icon="camera" aria-hidden="true"></span>
               <span>Foto</span>
             </button>
             <button id="read-new-btn" class="pill-btn" type="button">
-              <span aria-hidden="true">✨</span>
+              <span class="ui-icon" data-icon="pagePlus" aria-hidden="true"></span>
               <span>Nova Página</span>
             </button>
             <button id="read-finish-btn" class="pill-btn pill-celebrate" type="button">
-              <span aria-hidden="true">⭐</span>
+              <span class="ui-icon ui-icon-star" data-icon="star" aria-hidden="true"></span>
               <span>Concluir</span>
             </button>
           </div>
@@ -342,16 +382,22 @@
   <!-- Barra Flutuante de Áudio -->
   <div id="floating-audio-dock" class="floating-audio-dock" hidden>
     <div class="dock-inner">
-      <button id="dock-slow-btn" class="slow-pill" type="button" aria-pressed="false" title="Ler mais devagar">
-        <span aria-hidden="true">🐢</span>
+      <button id="dock-slow-btn" class="slow-pill" type="button" aria-pressed="false" title="Ler mais devagar" aria-label="Ler mais devagar">
+        <span class="ui-icon" data-icon="snail" aria-hidden="true"></span>
       </button>
-      <button id="dock-prev-btn" class="dock-nav-btn" type="button" aria-label="Frase anterior" title="Anterior">⏮</button>
+      <button id="dock-prev-btn" class="dock-nav-btn" type="button" aria-label="Frase anterior" title="Anterior">
+        <span class="ui-icon" data-icon="skipBack" aria-hidden="true"></span>
+      </button>
       <button id="dock-play-btn" class="dock-play-btn" type="button" aria-label="Ouvir ou Pausar">
-        <span id="dock-play-icon">▶</span>
+        <span id="dock-play-icon" class="ui-icon" data-icon="play" aria-hidden="true"></span>
         <span class="btn-spinner" hidden></span>
       </button>
-      <button id="dock-stop-btn" class="dock-nav-btn" type="button" aria-label="Parar" title="Parar">⏹</button>
-      <button id="dock-next-btn" class="dock-nav-btn" type="button" aria-label="Próxima frase" title="Próxima">⏭</button>
+      <button id="dock-stop-btn" class="dock-nav-btn" type="button" aria-label="Parar" title="Parar">
+        <span class="ui-icon" data-icon="stop" aria-hidden="true"></span>
+      </button>
+      <button id="dock-next-btn" class="dock-nav-btn" type="button" aria-label="Próxima frase" title="Próxima">
+        <span class="ui-icon" data-icon="skipNext" aria-hidden="true"></span>
+      </button>
       <span id="dock-status-label" class="dock-status-label">1 / 1</span>
     </div>
   </div>
@@ -360,8 +406,13 @@
   <div id="pages-drawer" class="modal-backdrop" hidden>
     <div class="drawer-sheet" role="dialog" aria-modal="true" aria-labelledby="pages-drawer-title">
       <div class="modal-header">
-        <h2 id="pages-drawer-title" class="modal-title">📚 Páginas Recentes</h2>
-        <button id="pages-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+        <h2 id="pages-drawer-title" class="modal-title">
+          <span class="ui-icon" data-icon="layers" aria-hidden="true"></span>
+          <span>Páginas Recentes</span>
+        </h2>
+        <button id="pages-close-btn" class="icon-btn" type="button" aria-label="Fechar">
+          <span class="ui-icon" data-icon="close" aria-hidden="true"></span>
+        </button>
       </div>
       <div id="pages-search-wrap" class="pages-search-wrap" hidden>
         <input id="pages-search-input" class="chat-input" type="search" placeholder="Procurar páginas&hellip;" />
@@ -374,21 +425,35 @@
   <div id="stars-modal" class="modal-backdrop" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stars-modal-title">
       <div class="modal-header">
-        <h2 id="stars-modal-title" class="modal-title">⭐ Estrelas e Palavras</h2>
-        <button id="stars-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+        <h2 id="stars-modal-title" class="modal-title">
+          <span class="ui-icon ui-icon-star" data-icon="star" aria-hidden="true"></span>
+          <span>Estrelas e Palavras</span>
+        </h2>
+        <button id="stars-close-btn" class="icon-btn" type="button" aria-label="Fechar">
+          <span class="ui-icon" data-icon="close" aria-hidden="true"></span>
+        </button>
       </div>
       <div class="stars-stats-grid">
         <div class="stat-tile stat-gold">
           <div class="stat-value" id="modal-stars-val">0</div>
-          <div class="stat-label">Estrelas ⭐</div>
+          <div class="stat-label">
+            <span class="ui-icon ui-icon-star" data-icon="star" aria-hidden="true"></span>
+            <span>Estrelas</span>
+          </div>
         </div>
         <div class="stat-tile stat-flame">
           <div class="stat-value" id="modal-streak-val">0</div>
-          <div class="stat-label">Dias Seguidos 🔥</div>
+          <div class="stat-label">
+            <span class="ui-icon" data-icon="flame" aria-hidden="true"></span>
+            <span>Dias Seguidos</span>
+          </div>
         </div>
         <div class="stat-tile stat-cobalt">
           <div class="stat-value" id="modal-pages-val">0</div>
-          <div class="stat-label">Páginas Lidas 📖</div>
+          <div class="stat-label">
+            <span class="ui-icon" data-icon="bookOpen" aria-hidden="true"></span>
+            <span>Páginas Lidas</span>
+          </div>
         </div>
       </div>
       <h3 class="subhead">Palavras Difíceis (toca para ouvir!)</h3>
@@ -400,8 +465,13 @@
   <div id="photo-modal" class="modal-backdrop" hidden>
     <div class="modal-card modal-photo-card" role="dialog" aria-modal="true" aria-label="Foto da página">
       <div class="modal-header">
-        <h2 class="modal-title">📷 Página Digitalizada</h2>
-        <button id="photo-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+        <h2 class="modal-title">
+          <span class="ui-icon" data-icon="camera" aria-hidden="true"></span>
+          <span>Página Digitalizada</span>
+        </h2>
+        <button id="photo-close-btn" class="icon-btn" type="button" aria-label="Fechar">
+          <span class="ui-icon" data-icon="close" aria-hidden="true"></span>
+        </button>
       </div>
       <img id="photo-modal-img" class="photo-lightbox-img" alt="Foto dos trabalhos ou livro" />
     </div>
@@ -412,7 +482,9 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
       <div class="modal-header">
         <h2 id="settings-modal-title" class="modal-title">Definições para Adultos</h2>
-        <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Fechar">✕</button>
+        <button id="settings-close-btn" class="icon-btn" type="button" aria-label="Fechar">
+          <span class="ui-icon" data-icon="close" aria-hidden="true"></span>
+        </button>
       </div>
       <p class="settings-note">Controlo de idioma, perfil da criança e seleção de voz.</p>
       <form id="settings-form" class="settings-form">
@@ -440,10 +512,12 @@
           Voz do Tutor (Gemini)
           <input id="set-voice" class="chat-input" type="text" placeholder="Sulafat" required />
         </label>
+        <p id="settings-voice-hint" class="settings-voice-hint" hidden></p>
         <label class="field-label">
           Regras de Dialeto e Tutor
           <textarea id="set-dialect" class="chat-input" rows="3" required></textarea>
         </label>
+        <p id="settings-error" class="settings-error" role="alert" hidden></p>
         <div class="settings-footer">
           <button class="btn btn-primary" type="submit">Guardar</button>
         </div>
@@ -452,7 +526,7 @@
   </div>
 
   <!-- Popover de Sílabas e Confetti -->
-  <div id="word-popover" class="word-popover" hidden>
+  <div id="word-popover" class="word-popover" data-placement="top" hidden>
     <strong id="word-popover-syllables"></strong>
     <span id="word-popover-hint"></span>
   </div>

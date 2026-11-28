@@ -1,31 +1,49 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FEF3C7"/>
-      <stop offset="100%" stop-color="#FDE68A"/>
+    <linearGradient id="vellumBg" x1="12" y1="8" x2="116" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FAF7F0"/>
+      <stop offset="100%" stop-color="#FEF0C7"/>
     </linearGradient>
-    <linearGradient id="body" x1="64" y1="28" x2="64" y2="112" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#3B82F6"/>
-      <stop offset="100%" stop-color="#1D4ED8"/>
+    <linearGradient id="azulejoBody" x1="64" y1="24" x2="64" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2959D4"/>
+      <stop offset="100%" stop-color="#173A94"/>
+    </linearGradient>
+    <linearGradient id="wingShade" x1="64" y1="48" x2="64" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1D42A3"/>
+      <stop offset="100%" stop-color="#132D73"/>
     </linearGradient>
   </defs>
-  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
-  <circle cx="64" cy="68" r="48" fill="#FFFBEB" fill-opacity="0.7"/>
-  <!-- Ears -->
-  <path d="M30 42L42 26L52 40Z" fill="#2563EB"/>
-  <path d="M98 42L86 26L76 40Z" fill="#2563EB"/>
-  <!-- Owl Body -->
-  <ellipse cx="64" cy="70" rx="36" ry="38" fill="url(#body)"/>
-  <!-- Belly -->
-  <ellipse cx="64" cy="84" rx="22" ry="20" fill="#FEF3C7"/>
-  <path d="M54 80Q58 84 62 80M66 80Q70 84 74 80M58 89Q64 94 70 89" stroke="#F59E0B" stroke-width="2.5" stroke-linecap="round"/>
+  <rect width="128" height="128" rx="30" fill="url(#vellumBg)"/>
+  <rect x="1.5" y="1.5" width="125" height="125" rx="28.5" stroke="#1A1D24" stroke-opacity="0.08" stroke-width="3"/>
+  <circle cx="64" cy="68" r="46" fill="#FFF6E3" fill-opacity="0.9"/>
+  <!-- Tucked ochre feet -->
+  <path d="M44 103C44 99 48 97 51 99C53 97 56 99 56 103C56 105 44 105 44 103Z" fill="#D97706"/>
+  <path d="M72 103C72 99 75 97 77 99C80 97 84 99 84 103C84 105 72 105 72 103Z" fill="#D97706"/>
+  <!-- Folded wings -->
+  <path d="M26 56C20 71 23 90 34 96C38 86 38 69 34 55Z" fill="url(#wingShade)"/>
+  <path d="M102 56C108 71 105 90 94 96C90 86 90 69 94 55Z" fill="url(#wingShade)"/>
+  <!-- Ear tufts -->
+  <path d="M29 42L40 22L52 37Z" fill="#2352C8"/>
+  <path d="M99 42L88 22L76 37Z" fill="#2352C8"/>
+  <!-- Owl body -->
+  <ellipse cx="64" cy="68" rx="35" ry="37" fill="url(#azulejoBody)"/>
+  <!-- Warm cream belly + ochre scallops -->
+  <ellipse cx="64" cy="83" rx="22" ry="19" fill="#FFF6E3"/>
+  <path d="M53 79Q58 83 63 79M65 79Q70 83 75 79M57 88Q64 93 71 88" stroke="#D97706" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- Heart-shaped facial disc -->
+  <path d="M64 68C55 72 34 70 34 53C34 42 44 37 54 41C58 43 62 47 64 51C66 47 70 43 74 41C84 37 94 42 94 53C94 70 73 72 64 68Z" fill="#EBF1FD"/>
   <!-- Eyes -->
-  <circle cx="48" cy="56" r="14" fill="#FFFFFF"/>
-  <circle cx="80" cy="56" r="14" fill="#FFFFFF"/>
-  <circle cx="49" cy="57" r="6.5" fill="#1E2433"/>
-  <circle cx="79" cy="57" r="6.5" fill="#1E2433"/>
-  <circle cx="46.5" cy="54" r="2.3" fill="#FFFFFF"/>
-  <circle cx="76.5" cy="54" r="2.3" fill="#FFFFFF"/>
-  <!-- Beak -->
-  <path d="M57 62H71L64 73Z" fill="#F59E0B"/>
+  <circle cx="48" cy="54" r="12.5" fill="#FFFFFF"/>
+  <circle cx="80" cy="54" r="12.5" fill="#FFFFFF"/>
+  <!-- Expressive eyebrows -->
+  <path d="M36 43Q47 38 56 43" stroke="#173A94" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M92 43Q81 38 72 43" stroke="#173A94" stroke-width="2.6" stroke-linecap="round"/>
+  <!-- Pupils + catchlights -->
+  <circle cx="49" cy="55" r="6" fill="#1A1D24"/>
+  <circle cx="79" cy="55" r="6" fill="#1A1D24"/>
+  <circle cx="46.5" cy="52" r="2.2" fill="#FFFFFF"/>
+  <circle cx="76.5" cy="52" r="2.2" fill="#FFFFFF"/>
+  <!-- Two-tone warm beak -->
+  <path d="M57 60H71L64 69Z" fill="#F59E0B"/>
+  <path d="M60 66H68L64 72Z" fill="#D97706"/>
 </svg>
